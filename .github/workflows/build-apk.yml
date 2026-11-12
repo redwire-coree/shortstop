@@ -15,11 +15,6 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.7
-      - name: Download Nunito Black (display font, optional)
-        run: |
-          mkdir -p app/src/main/assets/fonts
-          curl -fsSL -o app/src/main/assets/fonts/Nunito-Black.ttf \
-            https://github.com/googlefonts/nunito/raw/main/fonts/TTF/Nunito-Black.ttf || echo "Nunito not downloaded, using system font"
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4

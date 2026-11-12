@@ -18,9 +18,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.InsetDrawable
 import android.graphics.drawable.LayerDrawable
-import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
 import android.provider.Settings
 import android.text.format.DateFormat
@@ -31,7 +29,6 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
 
 /** Arc-style control panel built in code (no dependencies). Light and dark palettes, grain, scalloped dividers. */
@@ -58,7 +55,7 @@ class MainActivity : Activity() {
     private fun font(file: String, fallback: Typeface): Typeface =
         try { Typeface.createFromAsset(assets, "fonts/$file") } catch (e: Exception) { fallback }
 
-    // Display: Nunito Black (fetched at build time, else system black).
+    // Display: Nunito Black, bundled in assets/fonts.
     private val fDisplay by lazy { font("Nunito-Black.ttf", Typeface.create("sans-serif-black", Typeface.NORMAL)) }
     private val body by lazy { font("Inter-Regular.otf", Typeface.DEFAULT) }
     private val mono by lazy { font("IBMPlexMono-Bold.ttf", Typeface.create("monospace", Typeface.BOLD)) }
@@ -180,6 +177,41 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Hand-drawn on/off switch: 46x26 dp track, round knob that always stays inside it. */
+    private inner class ToggleView(ctx: Context, private var on: Boolean, private val onChange: (Boolean) -> Unit) : View(ctx) {
+        private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val knobPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = white }
+        private val rect = RectF()
+
+        init {
+            isClickable = true
+            isFocusable = true
+            contentDescription = if (on) "On" else "Off"
+            setOnClickListener {
+                on = !on
+                contentDescription = if (on) "On" else "Off"
+                invalidate()
+                onChange(on)
+            }
+        }
+
+        override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+            setMeasuredDimension(dp(46), dp(26))
+        }
+
+        override fun onDraw(c: Canvas) {
+            val w = width.toFloat()
+            val h = height.toFloat()
+            trackPaint.color = if (on) blue else trackOff
+            rect.set(0f, 0f, w, h)
+            c.drawRoundRect(rect, h / 2f, h / 2f, trackPaint)
+            val pad = dp(3).toFloat()
+            val r = h / 2f - pad
+            val cx = if (on) w - pad - r else pad + r
+            c.drawCircle(cx, h / 2f, r, knobPaint)
+        }
+    }
+
     /** Seven-day bar chart, oldest day on the left, today highlighted. */
     private inner class BarChart(ctx: Context, private val values: List<Int>, private val labels: List<String>) : View(ctx) {
         private val bar = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -247,20 +279,6 @@ class MainActivity : Activity() {
 
     private fun hairline() = View(this).apply { setBackgroundColor(rule) }
 
-    private fun pill(color: Int, w: Int, h: Int) = GradientDrawable().apply {
-        setColor(color); cornerRadius = h / 2f; setSize(w, h)
-    }
-
-    private fun styleSwitch(sw: Switch) {
-        sw.trackDrawable = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_checked), pill(blue, dp(46), dp(26)))
-            addState(intArrayOf(), pill(trackOff, dp(46), dp(26)))
-        }
-        val dot = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(white); setSize(dp(20), dp(20)) }
-        sw.thumbDrawable = InsetDrawable(dot, dp(3))
-        sw.showText = false
-    }
-
     private fun switchRow(title: String, sub: String, checked: Boolean, onChange: (Boolean) -> Unit): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -271,11 +289,7 @@ class MainActivity : Activity() {
         col.addView(text(title, 18f, accent, fDisplay))
         col.addView(label(sub, muted))
         row.addView(col, lp(0, wrapC, 1f))
-        row.addView(Switch(this).apply {
-            isChecked = checked
-            styleSwitch(this)
-            setOnCheckedChangeListener { _, v -> onChange(v); render() }
-        })
+        row.addView(ToggleView(this, checked) { v -> onChange(v); render() })
         return row
     }
 
