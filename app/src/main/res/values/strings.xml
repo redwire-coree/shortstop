@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Shortstop</string>
-    <string name="service_desc">Shortstop watches only YouTube, Instagram, Facebook and TikTok. When it sees Shorts or Reels on screen, it presses Back for you. It reads screen structure on your device and never stores or sends anything.</string>
+    <string name="service_desc">Shortstop watches only YouTube, Instagram, Facebook, TikTok, Snapchat, X, LinkedIn, Pinterest and Reddit. When it sees Shorts or Reels on screen, it presses Back for you. It reads screen structure on your device and never stores or sends anything.</string>
 </resources>

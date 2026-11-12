@@ -6,4 +6,4 @@
     android:canRetrieveWindowContent="true"
     android:description="@string/service_desc"
     android:notificationTimeout="150"
-    android:packageNames="com.google.android.youtube,com.instagram.android,com.facebook.katana,com.facebook.lite,com.zhiliaoapp.musically,com.ss.android.ugc.trill" />
+    android:packageNames="com.google.android.youtube,com.instagram.android,com.facebook.katana,com.facebook.lite,com.zhiliaoapp.musically,com.ss.android.ugc.trill,com.snapchat.android,com.twitter.android,com.linkedin.android,com.pinterest,com.reddit.frontpage" />
