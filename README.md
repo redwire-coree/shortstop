@@ -37,3 +37,10 @@ Facebook's IDs are the most volatile; the selected-"Reels"-tab check is the fall
 YouTube, Instagram, Facebook and TikTok rules are the most tested. Snapchat, X, LinkedIn, Pinterest and Reddit
 detect a *selected* tab labelled Spotlight / Videos / Watch, which may need tuning. Edit the tables at the bottom
 of `ShortsBlockerService.kt`.
+
+## v3 additions
+- Hold to open: a full-screen wall over a blocked screen; hold the button N seconds (adjustable, optionally longer each time) to open it for a few minutes.
+- More sections: Instagram Explore / Stories / comments, Facebook Stories, Snapchat Stories / Discover.
+- Close entire apps, and a Focus lock timer that closes every supported app and freezes settings until it ends.
+- Clean-day streak, badges, time reclaimed, peak-hours chart and heavy-day notice.
+- Animated toggles, springy buttons, staggered entrance, growing charts and bars, smooth expand/collapse.

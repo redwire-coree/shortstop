@@ -21,6 +21,37 @@ object Store {
         "reddit" to "Reddit video"
     )
 
+    /** Whole-app names, used for the "block entire app" rows. */
+    val APPS = linkedMapOf(
+        "youtube" to "YouTube", "instagram" to "Instagram", "facebook" to "Facebook",
+        "tiktok" to "TikTok", "snapchat" to "Snapchat", "twitter" to "X",
+        "linkedin" to "LinkedIn", "pinterest" to "Pinterest", "reddit" to "Reddit"
+    )
+
+    /** Extra parts of an app that can be blocked on their own. Off until switched on. */
+    data class Section(val key: String, val site: String, val title: String, val sub: String)
+
+    val SECTIONS = listOf(
+        Section("instagram_explore", "instagram", "Instagram Explore", "Search and Explore tab"),
+        Section("instagram_stories", "instagram", "Instagram Stories", "Story viewer"),
+        Section("instagram_comments", "instagram", "Instagram comments", "Comment threads"),
+        Section("facebook_stories", "facebook", "Facebook Stories", "Story viewer"),
+        Section("snapchat_stories", "snapchat", "Snapchat Stories", "Stories tab"),
+        Section("snapchat_discover", "snapchat", "Snapchat Discover", "Discover tab")
+    )
+
+    fun wholeKey(site: String) = "whole_$site"
+
+    /** Every key that can fire for an app: its feed, its sections, and the whole app. */
+    fun keysFor(site: String): List<String> =
+        listOf(site) + SECTIONS.filter { it.site == site }.map { it.key } + wholeKey(site)
+
+    fun label(key: String): String = when {
+        SITES.containsKey(key) -> SITES[key]!!
+        key.startsWith("whole_") -> (APPS[key.removePrefix("whole_")] ?: "App") + " (whole app)"
+        else -> SECTIONS.firstOrNull { it.key == key }?.title ?: "Short video"
+    }
+
     private val PACKAGES = mapOf(
         "com.google.android.youtube" to "youtube",
         "com.instagram.android" to "instagram",
@@ -46,7 +77,7 @@ object Store {
     fun enabled(c: Context) = p(c).getBoolean("enabled", true)
     fun setEnabled(c: Context, v: Boolean) = p(c).edit().putBoolean("enabled", v).apply()
 
-    fun site(c: Context, s: String) = p(c).getBoolean("site_$s", true)
+    fun site(c: Context, s: String) = p(c).getBoolean("site_$s", SITES.containsKey(s))
     fun setSite(c: Context, s: String, v: Boolean) = p(c).edit().putBoolean("site_$s", v).apply()
 
     fun snoozeUntil(c: Context) = p(c).getLong("snooze", 0L)
@@ -122,9 +153,18 @@ object Store {
     // ---- stats ----
     fun bump(c: Context) {
         val sp = p(c)
-        val k = "day_${keyOf(Calendar.getInstance())}"
-        sp.edit().putInt("total", sp.getInt("total", 0) + 1).putInt(k, sp.getInt(k, 0) + 1).apply()
+        val now = Calendar.getInstance()
+        val k = "day_${keyOf(now)}"
+        val h = "hr_${now.get(Calendar.HOUR_OF_DAY)}"
+        sp.edit()
+            .putInt("total", sp.getInt("total", 0) + 1)
+            .putInt(k, sp.getInt(k, 0) + 1)
+            .putInt(h, sp.getInt(h, 0) + 1)
+            .apply()
     }
+
+    /** Blocks per hour of day (0..23), all time. Powers the peak-usage insight. */
+    fun blocksByHour(c: Context): List<Int> = (0..23).map { p(c).getInt("hr_$it", 0) }
 
     fun blockedOn(c: Context, ago: Int) = p(c).getInt("day_${keyOf(daysAgo(ago))}", 0)
     fun today(c: Context) = blockedOn(c, 0)
@@ -132,4 +172,77 @@ object Store {
     fun dayLetter(ago: Int): String = "SMTWTFS"[daysAgo(ago).get(Calendar.DAY_OF_WEEK) - 1].toString()
     fun dayName(ago: Int): String =
         daysAgo(ago).getDisplayName(Calendar.DAY_OF_WEEK, Calendar.LONG, Locale.getDefault()) ?: ""
+
+    // ---- hold to open (the "wall") ----
+    fun holdOn(c: Context) = p(c).getBoolean("hold_on", false)
+    fun setHoldOn(c: Context, v: Boolean) = p(c).edit().putBoolean("hold_on", v).apply()
+
+    fun holdSeconds(c: Context) = p(c).getInt("hold_sec", 5)
+    fun setHoldSeconds(c: Context, v: Int) = p(c).edit().putInt("hold_sec", v.coerceIn(2, 60)).apply()
+
+    fun passMinutes(c: Context) = p(c).getInt("pass_min", 5)
+    fun setPassMinutes(c: Context, v: Int) = p(c).edit().putInt("pass_min", v.coerceIn(1, 30)).apply()
+
+    /** When on, every pass you take today adds 2 seconds to the next hold (up to +20). */
+    fun progressive(c: Context) = p(c).getBoolean("hold_prog", true)
+    fun setProgressive(c: Context, v: Boolean) = p(c).edit().putBoolean("hold_prog", v).apply()
+
+    private fun passKey(d: Calendar) = "pass_${keyOf(d)}"
+    fun passesOn(c: Context, ago: Int) = p(c).getInt(passKey(daysAgo(ago)), 0)
+    fun passesToday(c: Context) = passesOn(c, 0)
+
+    /** Seconds the person must hold right now. */
+    fun holdFor(c: Context): Int =
+        holdSeconds(c) + if (progressive(c)) minOf(20, passesToday(c) * 2) else 0
+
+    fun passUntil(c: Context, key: String) = p(c).getLong("passuntil_$key", 0L)
+
+    fun grantPass(c: Context, key: String) {
+        val sp = p(c)
+        val k = passKey(Calendar.getInstance())
+        sp.edit()
+            .putLong("passuntil_$key", System.currentTimeMillis() + passMinutes(c) * 60_000L)
+            .putInt(k, sp.getInt(k, 0) + 1)
+            .putInt("pass_total", sp.getInt("pass_total", 0) + 1)
+            .apply()
+    }
+
+    // ---- focus lock (cannot be undone until it ends) ----
+    fun lockUntil(c: Context) = p(c).getLong("lock_until", 0L)
+    fun locked(c: Context) = System.currentTimeMillis() < lockUntil(c)
+    fun lockLeftMs(c: Context) = maxOf(0L, lockUntil(c) - System.currentTimeMillis())
+    fun lockLeftMin(c: Context) = ((lockLeftMs(c) + 59_999L) / 60_000L).toInt()
+
+    fun startLock(c: Context, minutes: Int) {
+        val end = System.currentTimeMillis() + minutes * 60_000L
+        if (end > lockUntil(c)) p(c).edit().putLong("lock_until", end).apply()
+    }
+
+    // ---- streaks and rewards ----
+    private fun startOfDay(t: Long): Long = Calendar.getInstance().apply {
+        timeInMillis = t
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+    private fun firstDay(c: Context): Long {
+        val sp = p(c)
+        var f = sp.getLong("first", 0L)
+        if (f == 0L) { f = System.currentTimeMillis(); sp.edit().putLong("first", f).apply() }
+        return f
+    }
+
+    /** Days in a row (today included) with no hold-to-open pass taken, counted from first use. */
+    fun streak(c: Context): Int {
+        val first = startOfDay(firstDay(c))
+        var n = 0
+        while (n < 400) {
+            if (startOfDay(daysAgo(n).timeInMillis) < first) break
+            if (passesOn(c, n) > 0) break
+            n++
+        }
+        return n
+    }
+
+    /** Estimated minutes of scrolling not done: about 40 seconds per block. */
+    fun reclaimedMinutes(c: Context) = total(c) * 40 / 60
 }
