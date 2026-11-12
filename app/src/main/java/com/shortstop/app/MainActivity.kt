@@ -2,10 +2,17 @@ package com.shortstop.app
 
 import android.app.Activity
 import android.content.Intent
-import android.content.res.ColorStateList
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Shader
 import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
+import android.graphics.drawable.LayerDrawable
+import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
@@ -36,6 +43,37 @@ class MainActivity : Activity() {
         render()
     }
 
+    private fun font(file: String, fallback: Typeface): Typeface =
+        try { Typeface.createFromAsset(assets, "fonts/$file") } catch (e: Exception) { fallback }
+
+    // Display: Nunito Black (fetched at build time, else system black).
+    private val fDisplay by lazy { font("Nunito-Black.ttf", Typeface.create("sans-serif-black", Typeface.NORMAL)) }
+    private val body by lazy { font("Inter-Regular.otf", Typeface.DEFAULT) }
+    private val mono by lazy { font("IBMPlexMono-Bold.ttf", Typeface.create("monospace", Typeface.BOLD)) }
+
+    private fun grain(): Drawable {
+        val size = 96
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val r = java.util.Random(7)
+        for (x in 0 until size) for (y in 0 until size) bmp.setPixel(x, y, Color.argb(r.nextInt(46), 255, 255, 255))
+        val tile = BitmapDrawable(resources, bmp).apply { setTileModeXY(Shader.TileMode.REPEAT, Shader.TileMode.REPEAT) }
+        return LayerDrawable(arrayOf(ColorDrawable(blue), tile))
+    }
+
+    private fun pill(color: Int, w: Int, h: Int) = GradientDrawable().apply {
+        setColor(color); cornerRadius = h / 2f; setSize(w, h)
+    }
+
+    private fun styleSwitch(sw: Switch) {
+        sw.trackDrawable = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_checked), pill(blue, dp(46), dp(26)))
+            addState(intArrayOf(), pill(Color.parseColor("#CFCFE6"), dp(46), dp(26)))
+        }
+        val dot = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(white); setSize(dp(20), dp(20)) }
+        sw.thumbDrawable = InsetDrawable(dot, dp(3))
+        sw.showText = false
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun serviceOn(): Boolean {
@@ -50,11 +88,11 @@ class MainActivity : Activity() {
         }
 
     private fun label(t: String, color: Int) =
-        text(t.uppercase(), 11f, color, Typeface.create("monospace", Typeface.BOLD)).apply { letterSpacing = 0.08f }
+        text(t.uppercase(), 11f, color, mono).apply { letterSpacing = 0.08f }
 
     private fun pillButton(t: String, fill: Int, fg: Int, onClick: () -> Unit) = Button(this).apply {
         text = t.uppercase()
-        typeface = Typeface.create("monospace", Typeface.BOLD)
+        typeface = mono
         textSize = 12f
         letterSpacing = 0.05f
         setTextColor(fg)
@@ -71,16 +109,12 @@ class MainActivity : Activity() {
             setPadding(0, dp(12), 0, dp(12))
         }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(text(title, 18f, blue, Typeface.create("sans-serif-black", Typeface.NORMAL)))
+        col.addView(text(title, 18f, blue, fDisplay))
         col.addView(label(sub, muted))
         row.addView(col, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(Switch(this).apply {
             isChecked = checked
-            thumbTintList = ColorStateList.valueOf(white)
-            trackTintList = ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(blue, Color.parseColor("#CFCFE6"))
-            )
+            styleSwitch(this)
             setOnCheckedChangeListener { _, v -> onChange(v); render() }
         })
         return row
@@ -94,7 +128,7 @@ class MainActivity : Activity() {
 
         // Announcement bar
         column.addView(
-            text("Your attention, un-hijacked ✦", 13f, white, Typeface.DEFAULT, Gravity.CENTER).apply {
+            text("Your attention, un-hijacked ✦", 13f, white, body, Gravity.CENTER).apply {
                 setBackgroundColor(indigo); setPadding(dp(16), dp(10), dp(16), dp(10))
             }
         )
@@ -103,10 +137,10 @@ class MainActivity : Activity() {
         val hero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setBackgroundColor(blue)
+            background = grain()
             setPadding(dp(24), dp(36), dp(24), dp(48))
         }
-        hero.addView(text("Shortstop", 18f, white, Typeface.create("sans-serif-black", Typeface.NORMAL)))
+        hero.addView(text("Shortstop", 18f, white, fDisplay))
 
         val (headline, lede, actionLabel, action) = when {
             !serviceEnabled -> Quad(
@@ -124,9 +158,9 @@ class MainActivity : Activity() {
                 "Shorts are off.", "Back is pressed for you the moment a Short or Reel appears.", "Turn off"
             ) { Store.setEnabled(this, false); render() }
         }
-        hero.addView(text(headline, 40f, white, Typeface.create("sans-serif-black", Typeface.NORMAL), Gravity.CENTER)
+        hero.addView(text(headline, 40f, white, fDisplay, Gravity.CENTER)
             .apply { setPadding(0, dp(24), 0, dp(12)) })
-        hero.addView(text(lede, 15f, white, Typeface.DEFAULT, Gravity.CENTER).apply { setPadding(0, 0, 0, dp(24)) })
+        hero.addView(text(lede, 15f, white, body, Gravity.CENTER).apply { setPadding(0, 0, 0, dp(24)) })
         hero.addView(pillButton(actionLabel, white, blue, action))
         column.addView(hero)
 
@@ -161,7 +195,7 @@ class MainActivity : Activity() {
         val stats = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         fun stat(n: Int, l: String): View = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(text("$n", 40f, blue, Typeface.create("sans-serif-black", Typeface.NORMAL)))
+            addView(text("$n", 40f, blue, fDisplay))
             addView(label(l, blue))
         }
         stats.addView(stat(Store.today(this), "Today"), LinearLayout.LayoutParams(0, -2, 1f))
