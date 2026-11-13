@@ -9,7 +9,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
 
 /**
- * Watches the supported apps and reacts when a blocked part of one is on screen:
+ * Watches every app and reacts when something blocked is on screen:
+ *  - any app the person picked, and any website typed into a supported browser;
  *  - feed (Shorts/Reels/...): daily allowance first, otherwise the wall or Back/Home;
  *  - sections (Explore, Stories, comments, Discover): same rules;
  *  - whole app: Home straight away (or the wall);
@@ -24,6 +25,8 @@ class ShortsBlockerService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var tracking: String? = null
     private var lastBlock = 0L
+    private var lastUrlCheck = 0L
+    private var lastSkip = 0L
     private var strikes = 0
     private var lastStrike = 0L
 
@@ -31,22 +34,124 @@ class ShortsBlockerService : AccessibilityService() {
     private var wallPkg: String? = null
     private var wallKey: String? = null
 
+    // Cached copies so busy apps don't make us re-read preferences on every event.
+    private var appsCache: Set<String> = emptySet()
+    private var sitesCache: List<String> = emptyList()
+    private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> reloadCache() }
+
     private val tick = Runnable { tickOnce() }
     private val wallWatch = object : Runnable {
         override fun run() { watchWall() }
     }
 
+    private fun reloadCache() {
+        appsCache = Store.blockedApps(this)
+        sitesCache = Store.blockedSites(this)
+    }
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        reloadCache()
+        Store.prefs(this).registerOnSharedPreferenceChangeListener(prefListener)
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val pkg = event?.packageName?.toString() ?: return
-        val site = Store.siteFor(pkg) ?: return
         if (wall != null) return
-        if (tracking == site) return // the timer loop is already watching this app
 
         val now = SystemClock.uptimeMillis()
+        if (pkg == "com.google.android.youtube" && Store.autoSkip(this)) trySkipAd(now)
+
+        if (tracking != null && Store.siteFor(pkg) == tracking) return // allowance timer is watching
         if (now - lastBlock < 900) return // let the Back animation finish
 
+        // 1. Shortstop's own screen (optional wall in front of settings)
+        if (pkg == packageName) {
+            val key = Store.appKey(pkg)
+            if (Store.selfLock(this) && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+                Store.passUntil(this, key) <= System.currentTimeMillis() && !Store.locked(this)
+            ) showWall(key, pkg)
+            return
+        }
+
+        // 2. Any app the person picked
+        if (pkg in appsCache) {
+            val key = Store.appKey(pkg)
+            if (Store.locked(this) || Store.isActive(this, key)) {
+                handleHit(null, key, pkg)
+                return
+            }
+        }
+
+        // 3. Websites inside a browser
+        if (sitesCache.isNotEmpty() && BROWSER_IDS.containsKey(pkg) && now - lastUrlCheck > 400) {
+            lastUrlCheck = now
+            val root = rootInActiveWindow
+            if (root != null && root.packageName?.toString() == pkg) {
+                val d = blockedDomainOn(pkg, root)
+                if (d != null) {
+                    val key = Store.webKey(d)
+                    if (Store.locked(this) || Store.isActive(this, key)) {
+                        handleHit(null, key, pkg)
+                        return
+                    }
+                }
+            }
+        }
+
+        // 4. Short-video feeds, sections and whole-app switches
+        val site = Store.siteFor(pkg) ?: return
         val key = findHit(site, pkg) ?: return
         handleHit(site, key, pkg)
+    }
+
+    // ---------- websites ----------
+    private fun hostOf(raw: String): String? {
+        var t = raw.trim().lowercase()
+        if (t.isEmpty() || t.contains(' ')) return null
+        t = t.removePrefix("https://").removePrefix("http://").removePrefix("www.")
+        t = t.substringBefore('/').substringBefore('?').substringBefore('#').substringBefore(':')
+        return if (t.contains('.')) t else null
+    }
+
+    private fun blockedDomainOn(pkg: String, root: AccessibilityNodeInfo): String? {
+        val ids = BROWSER_IDS[pkg] ?: return null
+        for (id in ids) {
+            val nodes = root.findAccessibilityNodeInfosByViewId(id)
+            if (nodes.isNullOrEmpty()) continue
+            val host = hostOf(nodes[0].text?.toString() ?: continue) ?: continue
+            for (d in sitesCache) {
+                if (host == d || host.endsWith(".$d")) return d
+            }
+        }
+        return null
+    }
+
+    // ---------- YouTube ads ----------
+    private fun trySkipAd(now: Long) {
+        if (now - lastSkip < 600) return
+        val root = rootInActiveWindow ?: return
+        if (root.packageName?.toString() != "com.google.android.youtube") return
+        var target: AccessibilityNodeInfo? = root.findAccessibilityNodeInfosByViewId(
+            "com.google.android.youtube:id/skip_ad_button"
+        )?.firstOrNull()
+        if (target == null) {
+            target = root.findAccessibilityNodeInfosByText("Skip")?.firstOrNull {
+                val t = it.text?.toString()?.trim()?.lowercase()
+                t == "skip" || t == "skip ad" || t == "skip ads"
+            }
+        }
+        var n: AccessibilityNodeInfo? = target
+        var hops = 0
+        while (n != null && hops < 4) {
+            if (n.isClickable) {
+                n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                lastSkip = now
+                return
+            }
+            n = n.parent
+            hops++
+        }
     }
 
     /** Which blocked key (if any) is on screen right now for this app. */
@@ -65,11 +170,11 @@ class ShortsBlockerService : AccessibilityService() {
         return scan(keys.filter { it != whole }, root)
     }
 
-    private fun handleHit(site: String, key: String, pkg: String) {
+    private fun handleHit(site: String?, key: String, pkg: String) {
         val locked = Store.locked(this)
         if (!locked) {
-            val isFeed = key == site && site != "tiktok"
-            if (isFeed) {
+            val isFeed = site != null && key == site && site != "tiktok"
+            if (isFeed && site != null) {
                 val allow = Store.allowSeconds(this, site)
                 val used = Store.usedSeconds(this, site)
                 if (allow > 0 && used < allow) {
@@ -83,19 +188,28 @@ class ShortsBlockerService : AccessibilityService() {
                 return
             }
         }
-        val usedUp = !locked && key == site && Store.allowSeconds(this, site) > 0
+        val usedUp = !locked && site != null && key == site && Store.allowSeconds(this, site) > 0
         block(site, key, usedUp, locked)
+    }
+
+    private fun labelFor(key: String): String = when {
+        key.startsWith("app:") -> try {
+            val pm = packageManager
+            pm.getApplicationLabel(pm.getApplicationInfo(key.removePrefix("app:"), 0)).toString()
+        } catch (e: Exception) { key.removePrefix("app:") }
+        key.startsWith("web:") -> key.removePrefix("web:")
+        else -> Store.label(key)
     }
 
     // ---------- wall ----------
     private fun showWall(key: String, pkg: String) {
         val w = Wall(
-            this, Store.label(key), Store.holdFor(this), Store.passMinutes(this),
+            this, labelFor(key), Store.message(this), Store.holdFor(this), Store.passMinutes(this),
             onPass = { passWall(key) },
             onLeave = { leaveWall() }
         )
         if (!w.show()) {
-            block(Store.siteFor(pkg) ?: key, key, false, false)
+            block(Store.siteFor(pkg), key, false, false)
             return
         }
         wall = w
@@ -108,7 +222,7 @@ class ShortsBlockerService : AccessibilityService() {
     private fun passWall(key: String) {
         Store.grantPass(this, key)
         closeWall()
-        Toast.makeText(this, "${Store.label(key)} open for ${Store.passMinutes(this)} min", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "${labelFor(key)} open for ${Store.passMinutes(this)} min", Toast.LENGTH_SHORT).show()
     }
 
     private fun leaveWall() {
@@ -139,8 +253,10 @@ class ShortsBlockerService : AccessibilityService() {
         if (now != null && now != pkg && now != packageName) gone = true
         if (!gone && root != null && now == pkg) {
             val site = Store.siteFor(pkg)
-            val simple = key.startsWith("whole_") || key == "tiktok"
-            if (!simple && site != null && scan(listOf(key), root) == null) gone = true
+            val simple = key.startsWith("whole_") || key.startsWith("app:") || key == "tiktok"
+            if (key.startsWith("web:")) {
+                if (blockedDomainOn(pkg, root) != key.removePrefix("web:")) gone = true
+            } else if (!simple && site != null && scan(listOf(key), root) == null) gone = true
         }
         if (Store.locked(this)) gone = true // a lock started: the lock rules take over
         if (gone) {
@@ -183,13 +299,14 @@ class ShortsBlockerService : AccessibilityService() {
     }
 
     // ---------- blocking ----------
-    private fun block(site: String, key: String, allowanceUsedUp: Boolean, locked: Boolean) {
+    private fun block(site: String?, key: String, allowanceUsedUp: Boolean, locked: Boolean) {
         val now = SystemClock.uptimeMillis()
         lastBlock = now
         strikes = if (now - lastStrike < 4000) strikes + 1 else 1
         lastStrike = now
 
-        val goHome = locked || site == "tiktok" || key.startsWith("whole_") || strikes >= 3
+        val goHome = locked || site == "tiktok" || key.startsWith("whole_") ||
+            key.startsWith("app:") || key.startsWith("web:") || strikes >= 3
         if (goHome) {
             performGlobalAction(GLOBAL_ACTION_HOME)
             strikes = 0
@@ -198,7 +315,7 @@ class ShortsBlockerService : AccessibilityService() {
         }
         Store.bump(this)
 
-        val label = Store.label(key)
+        val label = labelFor(key)
         val msg = when {
             locked -> "Focus lock: ${Store.lockLeftMin(this)} min left"
             allowanceUsedUp -> "Daily allowance used up for $label"
@@ -252,12 +369,34 @@ class ShortsBlockerService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        try { Store.prefs(this).unregisterOnSharedPreferenceChangeListener(prefListener) } catch (e: Exception) { }
         closeWall()
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 
     companion object {
+        /** URL-bar view IDs of common browsers (used to spot blocked websites). */
+        private val BROWSER_IDS = mapOf(
+            "com.android.chrome" to listOf("com.android.chrome:id/url_bar"),
+            "com.chrome.beta" to listOf("com.chrome.beta:id/url_bar"),
+            "com.chrome.dev" to listOf("com.chrome.dev:id/url_bar"),
+            "com.brave.browser" to listOf("com.brave.browser:id/url_bar"),
+            "com.microsoft.emmx" to listOf("com.microsoft.emmx:id/url_bar"),
+            "com.kiwibrowser.browser" to listOf("com.kiwibrowser.browser:id/url_bar"),
+            "com.vivaldi.browser" to listOf("com.vivaldi.browser:id/url_bar"),
+            "com.sec.android.app.sbrowser" to listOf(
+                "com.sec.android.app.sbrowser:id/location_bar_edit_text"
+            ),
+            "org.mozilla.firefox" to listOf(
+                "org.mozilla.firefox:id/mozac_browser_toolbar_url_view",
+                "org.mozilla.firefox:id/url_bar_title"
+            ),
+            "org.mozilla.fenix" to listOf("org.mozilla.fenix:id/mozac_browser_toolbar_url_view"),
+            "com.opera.browser" to listOf("com.opera.browser:id/url_field"),
+            "com.duckduckgo.mobile.android" to listOf("com.duckduckgo.mobile.android:id/omnibarTextInput")
+        )
+
         private val CLASSIC_IDS = listOf(
             "reel_player", "reel_recycler", "reel_watch", "shorts_player", "shorts_container",
             "clips_viewer", "clips_tab_selected", "reels_viewer", "fb_shorts", "reels_tab_selected"
@@ -285,6 +424,9 @@ class ShortsBlockerService : AccessibilityService() {
             "linkedin" to setOf("videos"),
             "pinterest" to setOf("watch", "videos"),
             "reddit" to setOf("videos", "watch"),
+            "youtube_home" to setOf("home"),
+            "instagram_home" to setOf("home"),
+            "facebook_home" to setOf("home"),
             "instagram_explore" to setOf("search and explore", "explore"),
             "snapchat_stories" to setOf("stories"),
             "snapchat_discover" to setOf("discover")

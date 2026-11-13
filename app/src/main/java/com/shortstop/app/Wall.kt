@@ -1,20 +1,15 @@
 package com.shortstop.app
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RectF
-import android.graphics.Typeface
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.Drawable
-import android.graphics.drawable.LayerDrawable
-import android.graphics.Shader
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
@@ -25,18 +20,18 @@ import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.view.animation.OvershootInterpolator
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.FrameLayout
 
 /**
- * Full-screen "wall" drawn over a blocked app (accessibility overlay, needs no extra permission).
- * The person has to press and hold the button for [holdSec] seconds to open the section for a while,
- * or tap "Not now" to go Home.
+ * Full-screen wall drawn over a blocked app (accessibility overlay: needs no extra permission).
+ * Hold the button for [holdSec] seconds to open it for a while, or tap "Not now" to go Home.
  */
 class Wall(
     private val ctx: Context,
     private val title: String,
+    private val message: String,
     private val holdSec: Int,
     private val passMin: Int,
     private val onPass: () -> Unit,
@@ -44,72 +39,56 @@ class Wall(
 ) {
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var root: FrameLayout? = null
-
-    private val blue = Color.parseColor("#3B3BFF")
-    private val indigo = Color.parseColor("#1A1A8C")
+    private val pal = Palette(ctx)
+    private val fonts = Fonts(ctx)
 
     private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
 
-    private fun font(file: String, fallback: Typeface): Typeface =
-        try { Typeface.createFromAsset(ctx.assets, "fonts/$file") } catch (e: Exception) { fallback }
-
-    private val display = font("Nunito-Black.ttf", Typeface.create("sans-serif-black", Typeface.NORMAL))
-    private val body = font("Inter-Regular.otf", Typeface.DEFAULT)
-    private val mono = font("IBMPlexMono-Bold.ttf", Typeface.create("monospace", Typeface.BOLD))
-
-    private fun grain(): Drawable {
-        val size = 96
-        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val r = java.util.Random(7)
-        for (x in 0 until size) for (y in 0 until size) bmp.setPixel(x, y, Color.argb(r.nextInt(46), 255, 255, 255))
-        val tile = BitmapDrawable(ctx.resources, bmp).apply {
-            setTileModeXY(Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-        }
-        return LayerDrawable(arrayOf<Drawable>(ColorDrawable(blue), tile))
+    private fun tv(t: String, sp: Float, face: android.graphics.Typeface, color: Int) = TextView(ctx).apply {
+        text = t; textSize = sp; typeface = face; setTextColor(color); gravity = Gravity.CENTER
     }
 
-    private fun tv(t: String, sp: Float, face: Typeface, gravity: Int = Gravity.CENTER) = TextView(ctx).apply {
-        text = t; textSize = sp; typeface = face; setTextColor(Color.WHITE); this.gravity = gravity
-    }
-
-    /** Press-and-hold button that fills while held. Releasing early drains it back. */
+    /** Press-and-hold pill that fills while held. Releasing early drains it back. */
     private inner class HoldButton(context: Context) : View(context) {
         private var progress = 0f
         private var anim: ValueAnimator? = null
         private var done = false
-        private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = indigo }
+        private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.surface }
+        private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = pal.border; style = Paint.Style.STROKE; strokeWidth = dp(1).toFloat()
+        }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink }
         private val dark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = indigo; typeface = mono; textAlign = Paint.Align.CENTER; letterSpacing = 0.06f
+            color = pal.ink; typeface = fonts.semi; textAlign = Paint.Align.CENTER
         }
         private val light = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE; typeface = mono; textAlign = Paint.Align.CENTER; letterSpacing = 0.06f
+            color = pal.canvas; typeface = fonts.semi; textAlign = Paint.Align.CENTER
         }
         private val rect = RectF()
         private val clip = Path()
 
         override fun onMeasure(w: Int, h: Int) {
-            setMeasuredDimension(MeasureSpec.getSize(w), dp(68))
+            setMeasuredDimension(MeasureSpec.getSize(w), dp(60))
         }
 
         private fun caption(): String {
-            if (done) return "OPEN"
-            if (progress <= 0f) return "HOLD TO OPEN · ${holdSec}s"
+            if (done) return "Opening…"
+            if (progress <= 0f) return "Hold to open · ${holdSec}s"
             val left = Math.ceil(((1f - progress) * holdSec).toDouble()).toInt()
-            return "KEEP HOLDING · ${maxOf(1, left)}s"
+            return "Keep holding · ${maxOf(1, left)}s"
         }
 
         override fun onDraw(c: Canvas) {
             val w = width.toFloat()
             val h = height.toFloat()
-            val r = dp(18).toFloat()
+            val r = h / 2f
             rect.set(0f, 0f, w, h)
             c.drawRoundRect(rect, r, r, bg)
 
             val cx = w / 2f
-            val cy = h / 2f + dp(5)
-            dark.textSize = dp(14).toFloat()
-            light.textSize = dp(14).toFloat()
+            dark.textSize = dp(15).toFloat()
+            light.textSize = dp(15).toFloat()
+            val cy = h / 2f - (dark.ascent() + dark.descent()) / 2f
             c.drawText(caption(), cx, cy, dark)
 
             if (progress > 0f) {
@@ -118,12 +97,12 @@ class Wall(
                 clip.addRoundRect(rect, r, r, Path.Direction.CW)
                 c.clipPath(clip)
                 c.drawRect(0f, 0f, w * progress, h, fill)
-                c.save()
                 c.clipRect(0f, 0f, w * progress, h)
                 c.drawText(caption(), cx, cy, light)
                 c.restore()
-                c.restore()
             }
+            rect.inset(dp(1) / 2f, dp(1) / 2f)
+            c.drawRoundRect(rect, r, r, edge)
         }
 
         private fun animateTo(target: Float, ms: Long, onEnd: (() -> Unit)? = null) {
@@ -133,9 +112,9 @@ class Wall(
             a.interpolator = if (target >= 1f) LinearInterpolator() else DecelerateInterpolator()
             a.addUpdateListener { progress = it.animatedValue as Float; invalidate() }
             var cancelled = false
-            a.addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationCancel(animation: android.animation.Animator) { cancelled = true }
-                override fun onAnimationEnd(animation: android.animation.Animator) {
+            a.addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationCancel(animation: Animator) { cancelled = true }
+                override fun onAnimationEnd(animation: Animator) {
                     if (!cancelled) onEnd?.invoke()
                 }
             })
@@ -155,7 +134,7 @@ class Wall(
                         progress = 1f
                         invalidate()
                         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        postDelayed({ onPass() }, 220)
+                        postDelayed({ onPass() }, 200)
                     }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -173,43 +152,45 @@ class Wall(
     }
 
     private fun build(): FrameLayout {
-        val frame = FrameLayout(ctx).apply { background = grain() }
-
+        val frame = FrameLayout(ctx).apply { setBackgroundColor(pal.canvas) }
         val col = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(28), dp(24), dp(28), dp(24))
         }
 
-        val tag = tv("SHORTSTOP", 12f, mono).apply { letterSpacing = 0.12f; alpha = 0.85f }
-        val head = tv("Pause.", 52f, display)
+        val tile = tv(title.take(1).uppercase(), 24f, fonts.bold, pal.canvas).apply {
+            background = GradientDrawable().apply { setColor(pal.ink); cornerRadius = dp(22).toFloat() }
+        }
+        val head = tv("Pause.", 48f, fonts.bold, pal.ink).apply { letterSpacing = -0.02f }
         val sub = tv(
-            "$title is blocked. Hold the button to open it for $passMin min, or let it go.",
-            16f, body
-        ).apply { alpha = 0.92f }
+            if (message.isNotBlank()) message else "$title is blocked right now.",
+            17f, fonts.regular, pal.ink
+        )
+        val hint = tv("Hold the button to open it for $passMin min.", 14f, fonts.regular, pal.muted)
         val hold = HoldButton(ctx)
-        val leave = tv("NOT NOW", 13f, mono).apply {
-            letterSpacing = 0.1f
-            setPadding(dp(20), dp(18), dp(20), dp(18))
+        val leave = tv("Not now", 15f, fonts.semi, pal.ink).apply {
+            background = GradientDrawable().apply {
+                setColor(pal.canvas); setStroke(dp(1), pal.border); cornerRadius = dp(40).toFloat()
+            }
+            setPadding(dp(28), dp(14), dp(28), dp(14))
             setOnClickListener { onLeave() }
         }
 
-        col.addView(tag)
-        col.addView(head, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            .apply { topMargin = dp(18); bottomMargin = dp(10) })
-        col.addView(sub, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            .apply { bottomMargin = dp(36) })
-        col.addView(hold, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        col.addView(leave, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            .apply { topMargin = dp(14) })
+        val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+        val match = ViewGroup.LayoutParams.MATCH_PARENT
+        col.addView(tile, LinearLayout.LayoutParams(dp(64), dp(64)))
+        col.addView(head, LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dp(24); bottomMargin = dp(10) })
+        col.addView(sub, LinearLayout.LayoutParams(match, wrap).apply { bottomMargin = dp(8) })
+        col.addView(hint, LinearLayout.LayoutParams(match, wrap).apply { bottomMargin = dp(32) })
+        col.addView(hold, LinearLayout.LayoutParams(match, wrap))
+        col.addView(leave, LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dp(14) })
 
-        frame.addView(col, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        frame.addView(col, FrameLayout.LayoutParams(match, wrap, Gravity.CENTER))
 
-        // Entrance: fade and rise.
         col.alpha = 0f
-        col.translationY = dp(24).toFloat()
-        col.animate().alpha(1f).translationY(0f).setDuration(320)
+        col.translationY = dp(20).toFloat()
+        col.animate().alpha(1f).translationY(0f).setDuration(300)
             .setInterpolator(DecelerateInterpolator(1.6f)).start()
         return frame
     }

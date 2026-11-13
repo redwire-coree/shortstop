@@ -35,6 +35,9 @@ object Store {
         Section("instagram_explore", "instagram", "Instagram Explore", "Search and Explore tab"),
         Section("instagram_stories", "instagram", "Instagram Stories", "Story viewer"),
         Section("instagram_comments", "instagram", "Instagram comments", "Comment threads"),
+        Section("youtube_home", "youtube", "YouTube home feed", "Home tab"),
+        Section("instagram_home", "instagram", "Instagram home feed", "Home tab"),
+        Section("facebook_home", "facebook", "Facebook home feed", "Home tab"),
         Section("facebook_stories", "facebook", "Facebook Stories", "Story viewer"),
         Section("snapchat_stories", "snapchat", "Snapchat Stories", "Stories tab"),
         Section("snapchat_discover", "snapchat", "Snapchat Discover", "Discover tab")
@@ -67,6 +70,8 @@ object Store {
     )
 
     fun siteFor(pkg: String): String? = PACKAGES[pkg]
+
+    fun prefs(c: Context) = p(c)
 
     private fun p(c: Context) = c.getSharedPreferences("shortstop", Context.MODE_PRIVATE)
 
@@ -136,7 +141,8 @@ object Store {
     }
 
     fun isActive(c: Context, s: String) =
-        enabled(c) && System.currentTimeMillis() >= snoozeUntil(c) && site(c, s) && inSchedule(c)
+        enabled(c) && System.currentTimeMillis() >= snoozeUntil(c) &&
+            (s.startsWith("app:") || s.startsWith("web:") || site(c, s)) && inSchedule(c)
 
     // ---- daily allowance (minutes of short video allowed per app per day) ----
     fun allowMinutes(c: Context, s: String) = p(c).getInt("allow_$s", 0)
@@ -178,10 +184,10 @@ object Store {
     fun setHoldOn(c: Context, v: Boolean) = p(c).edit().putBoolean("hold_on", v).apply()
 
     fun holdSeconds(c: Context) = p(c).getInt("hold_sec", 5)
-    fun setHoldSeconds(c: Context, v: Int) = p(c).edit().putInt("hold_sec", v.coerceIn(2, 60)).apply()
+    fun setHoldSeconds(c: Context, v: Int) = p(c).edit().putInt("hold_sec", v.coerceIn(2, 180)).apply()
 
     fun passMinutes(c: Context) = p(c).getInt("pass_min", 5)
-    fun setPassMinutes(c: Context, v: Int) = p(c).edit().putInt("pass_min", v.coerceIn(1, 30)).apply()
+    fun setPassMinutes(c: Context, v: Int) = p(c).edit().putInt("pass_min", v.coerceIn(1, 180)).apply()
 
     /** When on, every pass you take today adds 2 seconds to the next hold (up to +20). */
     fun progressive(c: Context) = p(c).getBoolean("hold_prog", true)
@@ -245,4 +251,49 @@ object Store {
 
     /** Estimated minutes of scrolling not done: about 40 seconds per block. */
     fun reclaimedMinutes(c: Context) = total(c) * 40 / 60
+
+    // ---- any app, any website ----
+    fun appKey(pkg: String) = "app:$pkg"
+    fun webKey(domain: String) = "web:$domain"
+
+    fun blockedApps(c: Context): Set<String> = HashSet(p(c).getStringSet("apps", emptySet()) ?: emptySet())
+    fun isAppBlocked(c: Context, pkg: String) = blockedApps(c).contains(pkg)
+    fun setAppBlocked(c: Context, pkg: String, on: Boolean) {
+        val s = blockedApps(c).toMutableSet()
+        if (on) s.add(pkg) else s.remove(pkg)
+        p(c).edit().putStringSet("apps", s).apply()
+    }
+
+    fun blockedSites(c: Context): List<String> = (p(c).getStringSet("webs", emptySet()) ?: emptySet()).sorted()
+    fun addSite(c: Context, domain: String) {
+        val s = HashSet(p(c).getStringSet("webs", emptySet()) ?: emptySet())
+        s.add(domain)
+        p(c).edit().putStringSet("webs", s).apply()
+    }
+    fun removeSite(c: Context, domain: String) {
+        val s = HashSet(p(c).getStringSet("webs", emptySet()) ?: emptySet())
+        s.remove(domain)
+        p(c).edit().putStringSet("webs", s).apply()
+    }
+
+    /** "https://www.Reddit.com/r/x" -> "reddit.com". Returns null when it isn't a usable domain. */
+    fun cleanDomain(raw: String): String? {
+        var d = raw.trim().lowercase()
+        d = d.removePrefix("https://").removePrefix("http://").removePrefix("www.")
+        d = d.substringBefore('/').substringBefore('?').substringBefore('#').substringBefore(':')
+        if (d.length < 3 || !d.contains('.') || d.contains(' ') || d.startsWith('.') || d.endsWith('.')) return null
+        return d
+    }
+
+    // ---- misc settings ----
+    fun message(c: Context) = p(c).getString("message", "") ?: ""
+    fun setMessage(c: Context, v: String) = p(c).edit().putString("message", v).apply()
+
+    /** Put the hold wall in front of Shortstop's own screen too, so settings are harder to change. */
+    fun selfLock(c: Context) = p(c).getBoolean("self_lock", false)
+    fun setSelfLock(c: Context, v: Boolean) = p(c).edit().putBoolean("self_lock", v).apply()
+
+    /** Taps "Skip" on YouTube video ads for you. */
+    fun autoSkip(c: Context) = p(c).getBoolean("autoskip", false)
+    fun setAutoSkip(c: Context, v: Boolean) = p(c).edit().putBoolean("autoskip", v).apply()
 }
