@@ -67,7 +67,7 @@ class MainActivity : Activity() {
     private val wrapC = ViewGroup.LayoutParams.WRAP_CONTENT
 
     private val pages = ArrayList<View>()
-    private val navItems = ArrayList<TextView>()
+    private var gooey: GooeyNav? = null
     private var tab = 0
 
     // Focus tab
@@ -77,7 +77,11 @@ class MainActivity : Activity() {
     private var runRing: RingView? = null
     private var runInfo: TextView? = null
     private var runBreakBtn: TextView? = null
-    private var runEndBtn: TextView? = null
+    private var runEndBtn: FuseButton? = null
+    private var runLattice: LatticeLoader? = null
+    private var runLabel: TextView? = null
+    private var runElapsed: TextView? = null
+    private val setupChecks = ArrayList<SpringCheck>()
     private var statsWrap: View? = null
     private var focusStatsCol: LinearLayout? = null
     private var startBar: View? = null
@@ -124,8 +128,7 @@ class MainActivity : Activity() {
     /** False (with a short message) while strict mode is on: nothing may be switched off. */
     private fun free(): Boolean {
         if (!Store.frozen(this)) return true
-        Toast.makeText(this, "Strict mode: ${Store.focusLeftMin(this)} min left. Nothing can change until it ends.",
-            Toast.LENGTH_SHORT).show()
+        toast("Strict mode: ${Store.focusLeftMin(this)} min left. Nothing can change until it ends.")
         return false
     }
 
@@ -148,9 +151,24 @@ class MainActivity : Activity() {
         } catch (e: Exception) { false }
     }
 
+    private var toaster: Toaster? = null
+
+    /** In-app toast (react-bits SwipeToast). First sentence is the title, the rest is the description. */
+    private fun toast(msg: String, desc: String = "", action: String? = null, onAction: (() -> Unit)? = null) {
+        var t = msg
+        var d = desc
+        if (d.isEmpty()) {
+            val i = msg.indexOf(". ")
+            if (i in 4 until msg.length - 3) { t = msg.substring(0, i); d = msg.substring(i + 2) }
+        }
+        val tz = toaster
+        if (tz != null) tz.show(t.trimEnd('.'), d, action, onAction)
+        else android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     private fun open(i: Intent) {
         try { startActivity(i) } catch (e: Exception) {
-            Toast.makeText(this, "Couldn't open that screen on this phone.", Toast.LENGTH_SHORT).show()
+            toast("Couldn't open that screen on this phone.")
         }
     }
 
@@ -517,7 +535,7 @@ class MainActivity : Activity() {
 
         charts = ArrayList()
         pages.clear()
-        navItems.clear()
+        setupChecks.clear()
         sheetLayer = null
 
         rootFrame = FrameLayout(this).apply { setBackgroundColor(pal.canvas) }
@@ -540,19 +558,16 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(10), dp(8), dp(10), dp(8))
             setBackgroundColor(pal.canvas)
+            clipChildren = false
+            clipToPadding = false
         }
-        listOf("Focus", "Schedule", "Blocks", "Stats", "Settings").forEachIndexed { i, name ->
-            val item = tv(name, 12f, fonts.semi, pal.muted, Gravity.CENTER).apply {
-                setPadding(dp(2), dp(10), dp(2), dp(10))
-                isClickable = true
-                setOnClickListener { selectTab(i) }
-                press(this)
-            }
-            navItems.add(item)
-            nav.addView(item, lp(0, wrapC, 1f).apply { if (i < 4) marginEnd = dp(4) })
-        }
+        rootView.clipChildren = false
+        val g = GooeyNav(this, pal, fonts, listOf("Focus", "Schedule", "Blocks", "Stats", "Settings"), tab) { i -> selectTab(i) }
+        gooey = g
+        nav.addView(g, lp(matchP, wrapC))
         rootView.addView(nav, lp(matchP, wrapC))
         rootFrame.addView(rootView, FrameLayout.LayoutParams(matchP, matchP))
+        toaster = Toaster(this, rootFrame, pal, fonts, dp(84))
         spark = SparkLayer(this, pal.ink)
         rootFrame.addView(spark, FrameLayout.LayoutParams(matchP, matchP))
         setContentView(rootFrame)
@@ -563,11 +578,7 @@ class MainActivity : Activity() {
     }
 
     private fun styleNav() {
-        navItems.forEachIndexed { i, v ->
-            val sel = i == tab
-            v.setTextColor(if (sel) pal.canvas else pal.muted)
-            v.background = round(if (sel) pal.ink else Color.TRANSPARENT, 40)
-        }
+        gooey?.select(tab, true)
     }
 
     private fun selectTab(i: Int) {
@@ -591,6 +602,31 @@ class MainActivity : Activity() {
     }
 
     private val stagAnims = ArrayList<ValueAnimator>()
+
+    /** Rows spring into view (react-bits AnimatedList, pop). */
+    private fun popIn(v: View, delay: Long) {
+        (v.getTag(R_POP) as? ValueAnimator)?.cancel()
+        v.alpha = 0f
+        v.scaleX = 0.92f
+        v.scaleY = 0.92f
+        val a = ValueAnimator.ofFloat(0f, 1f)
+        a.startDelay = delay
+        a.duration = 380
+        a.interpolator = android.view.animation.OvershootInterpolator(1.4f)
+        a.addUpdateListener {
+            val f = it.animatedValue as Float
+            v.alpha = f.coerceIn(0f, 1f)
+            v.scaleX = 0.92f + 0.08f * f
+            v.scaleY = 0.92f + 0.08f * f
+        }
+        a.addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationCancel(animation: android.animation.Animator) {
+                v.alpha = 1f; v.scaleX = 1f; v.scaleY = 1f
+            }
+        })
+        v.setTag(R_POP, a)
+        a.start()
+    }
 
     /** Cards of a page glide in one after another (react-bits AnimatedList). */
     private fun stagger(page: View) {
@@ -628,6 +664,7 @@ class MainActivity : Activity() {
         }
     }
 
+    private val R_POP = 0x7f0a0001
     private var spark: SparkLayer? = null
     private var downX = 0f
     private var downY = 0f
@@ -711,6 +748,7 @@ class MainActivity : Activity() {
         layer.addView(scrim, FrameLayout.LayoutParams(matchP, matchP))
         layer.addView(panel, FrameLayout.LayoutParams(matchP, wrapC, Gravity.BOTTOM))
         rootFrame.addView(layer, FrameLayout.LayoutParams(matchP, matchP))
+        toaster?.front()
         spark?.bringToFront()
         panel.translationY = dp(700).toFloat()
         scrim.animate().alpha(1f).setDuration(200).start()
@@ -742,9 +780,33 @@ class MainActivity : Activity() {
     }
 
     // ---------- Focus tab ----------
+    private fun batteryOk(): Boolean = try {
+        (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(packageName)
+    } catch (e: Exception) { true }
+
+    private fun stepRow(title: String, sub: String, onClick: () -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(15), 0, dp(15))
+            isClickable = true
+            setOnClickListener { onClick() }
+        }
+        val chk = SpringCheck(this, pal, fonts, title, 18f)
+        setupChecks.add(chk)
+        row.addView(chk, lp(wrapC, wrapC))
+        row.addView(tv(sub, 13f, fonts.regular, pal.muted).apply { setPadding(dp(40), dp(4), 0, 0) })
+        return row
+    }
+
     private fun refreshStatus() {
         val on = serviceOn()
-        setupCard?.visibility = if (on) View.GONE else View.VISIBLE
+        val batt = batteryOk()
+        setupCard?.visibility = if (on && batt) View.GONE else View.VISIBLE
+        if (setupChecks.size == 3) {
+            setupChecks[0].setChecked(on, true)
+            setupChecks[1].setChecked(on, true)
+            setupChecks[2].setChecked(batt, true)
+        }
         val running = Store.focusRunning(this)
         statusChip?.text = when {
             !on -> "Setup needed"
@@ -777,14 +839,14 @@ class MainActivity : Activity() {
         // First-run setup
         val setup = card()
         setup.addView(display("Finish setup", 20f).apply { setPadding(0, dp(16), 0, dp(4)) })
-        setup.addRow(linkRow("1. Turn on Shortstop", "Accessibility settings > Shortstop > On") {
+        setup.addRow(stepRow("Turn on Shortstop", "Accessibility settings > Shortstop > On") {
             open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
-        setup.addRow(linkRow("2. Allow restricted settings", "App info > ⋮ menu > Allow restricted settings") {
+        setup.addRow(stepRow("Allow restricted settings", "App info > ⋮ menu > Allow restricted settings") {
             open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         })
-        setup.addRow(linkRow("3. Keep it running", "Battery: No restrictions (Xiaomi: allow Autostart)") {
-            open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        setup.addRow(stepRow("Keep it running", "Battery: No restrictions (Xiaomi: allow Autostart)") {
+            open(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         })
         setupCard = setup
         col.addView(setup, lp(matchP, wrapC).apply { topMargin = dp(18) })
@@ -796,6 +858,17 @@ class MainActivity : Activity() {
             background = round(pal.surface, 24, pal.border, dp(1))
             setPadding(dp(20), dp(28), dp(20), dp(24))
         }
+        val stat = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val lat = LatticeLoader(this, pal.ink)
+        runLattice = lat
+        stat.addView(lat, lp(wrapC, wrapC).apply { marginEnd = dp(10) })
+        val rl = tv("Focusing", 14f, fonts.medium, pal.ink)
+        runLabel = rl
+        stat.addView(rl, lp(wrapC, wrapC))
+        val re = tv("", 13f, fonts.regular, pal.muted)
+        runElapsed = re
+        stat.addView(re, lp(wrapC, wrapC).apply { marginStart = dp(10) })
+        run.addView(stat, lp(wrapC, wrapC).apply { bottomMargin = dp(18) })
         val ring = RingView(this, pal, fonts, 240, 16, true)
         runRing = ring
         run.addView(ring, lp(wrapC, wrapC))
@@ -804,7 +877,13 @@ class MainActivity : Activity() {
         run.addView(info, lp(matchP, wrapC))
         val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val breakBtn = pill("Take a break", false) { onBreakClick() }
-        val endBtn = pill("End session", false) { onEndClick() }
+        val endBtn = FuseButton(this, pal, fonts, "End session", "Undo", "Ended", 4000L,
+            { if (Store.frozen(this)) { free(); false } else true }) {
+            Store.endFocusEarly(this)
+            wasRunning = false
+            updateRunning()
+            fillFocusStats()
+        }
         runBreakBtn = breakBtn
         runEndBtn = endBtn
         btns.addView(breakBtn, lp(0, wrapC, 1f).apply { marginEnd = dp(8) })
@@ -857,7 +936,7 @@ class MainActivity : Activity() {
         if (Store.onBreak(this)) {
             Store.endBreak(this)
         } else if (Store.startBreak(this)) {
-            Toast.makeText(this, "Break started. Blocks return when it ends.", Toast.LENGTH_SHORT).show()
+            toast("Break started. Blocks return when it ends.")
         }
         updateRunning()
     }
@@ -902,6 +981,11 @@ class MainActivity : Activity() {
                 b.text = if (Store.frozen(this)) "Strict mode" else "End session"
                 b.alpha = if (Store.frozen(this)) 0.5f else 1f
             }
+            runLattice?.running = !onBreak
+            runLabel?.text = if (onBreak) "On break" else "Focusing"
+            runElapsed?.text = clock(now - start)
+        } else {
+            runEndBtn?.reset()
         }
         if (wasRunning && !running) onSessionDone()
         wasRunning = running
@@ -1002,10 +1086,17 @@ class MainActivity : Activity() {
                 val sess = sectionCard("Sessions")
                 if (sessions.isEmpty()) sess.addView(tv("No sessions yet", 13f, fonts.regular, pal.muted).apply { setPadding(0, 0, 0, dp(16)) })
                 val tf = SimpleDateFormat(if (DateFormat.is24HourFormat(this)) "HH:mm" else "h:mm a", Locale.getDefault())
-                sessions.forEach { s ->
-                    val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, dp(12)) }
+                sessions.forEachIndexed { idx, s ->
+                    val r = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(12))
+                    }
+                    val mark = StatusMark(this, pal, 24f)
+                    mark.setStatus(if (s.done) StatusMark.DONE else StatusMark.CANCELLED, true, idx * 70L)
+                    r.addView(mark, lp(wrapC, wrapC).apply { marginEnd = dp(12) })
                     val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                    left.addView(tv(s.tag.ifEmpty { "Focus" }, 15f, fonts.medium, pal.ink))
+                    left.addView(tv(s.tag.ifEmpty { "Focus" }, 15f, fonts.medium, pal.ink).apply {
+                        if (!s.done) paintFlags = paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
+                    })
                     left.addView(tv(tf.format(java.util.Date(s.start)) + if (s.done) "" else " · ended early", 12f, fonts.regular, pal.muted))
                     r.addView(left, lp(0, wrapC, 1f))
                     r.addView(tv(fmtMin(s.minutes), 15f, fonts.semi, pal.ink))
@@ -1152,20 +1243,21 @@ class MainActivity : Activity() {
         })
         box.addView(opts, lp(matchP, wrapC).apply { topMargin = dp(16) })
 
-        box.addView(pill("Start focus", true) {
+        box.addView(SlideCommit(this, pal, fonts, "Slide to start", "Started", {
             if (!serviceOn()) {
-                Toast.makeText(this, "Turn on the Shortstop accessibility service first.", Toast.LENGTH_LONG).show()
+                toast("Turn on the Shortstop accessibility service first.")
                 open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                return@pill
-            }
+                false
+            } else true
+        }) {
             if (Store.focusApps(this).isEmpty()) {
-                Toast.makeText(this, "No focus apps picked yet, so only your always-on rules apply.", Toast.LENGTH_LONG).show()
+                toast("No focus apps picked yet, so only your always-on rules apply.")
             }
             Store.startFocus(this, dur, tag, strict, breaks, breakMin)
             closeSheet()
             wasRunning = true
             updateRunning()
-        }, lp(matchP, wrapC).apply { topMargin = dp(16); bottomMargin = dp(4) })
+        }, lp(matchP, wrapC).apply { topMargin = dp(16); bottomMargin = dp(4); gravity = Gravity.CENTER_HORIZONTAL })
         showSheet("Start focus", box)
     }
 
@@ -1177,7 +1269,7 @@ class MainActivity : Activity() {
         c.addRow(toggleRow("Block notifications", "Hides notifications from your blocked apps", Store.blockNotifs(this)) {
             Store.setBlockNotifs(this, it)
             if (it && !notifAccess()) {
-                Toast.makeText(this, "Switch on Notification access for Shortstop.", Toast.LENGTH_LONG).show()
+                toast("Switch on Notification access for Shortstop.")
                 open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
         })
@@ -1317,8 +1409,8 @@ class MainActivity : Activity() {
         box.addView(note("Overnight windows work too, for example 10:00 PM to 6:00 AM."))
 
         box.addView(pill("Save", true) {
-            if (start == end) { Toast.makeText(this, "Start and end can't be the same.", Toast.LENGTH_SHORT).show(); return@pill }
-            if (days == 0) { Toast.makeText(this, "Pick at least one day.", Toast.LENGTH_SHORT).show(); return@pill }
+            if (start == end) { toast("Start and end can't be the same."); return@pill }
+            if (days == 0) { toast("Pick at least one day."); return@pill }
             val n = name.trim().ifEmpty { "Schedule" }
             val all = Store.schedules(this)
             val updated = if (existing == null) {
@@ -1333,10 +1425,16 @@ class MainActivity : Activity() {
         }, lp(matchP, wrapC).apply { topMargin = dp(18) })
         if (existing != null) {
             box.addView(pill("Delete schedule", false) {
-                Store.saveSchedules(this, Store.schedules(this).filter { it.id != existing.id })
+                val before = Store.schedules(this)
+                Store.saveSchedules(this, before.filter { it.id != existing.id })
                 closeSheet()
                 fillSchedules()
                 refreshStatus()
+                toast("Schedule deleted", existing.name, "Undo") {
+                    Store.saveSchedules(this, before)
+                    fillSchedules()
+                    refreshStatus()
+                }
             }, lp(matchP, wrapC).apply { topMargin = dp(10) })
         }
         showSheet(if (existing == null) "New schedule" else "Edit schedule", box)
@@ -1516,7 +1614,9 @@ class MainActivity : Activity() {
             selector = ColorDrawable(Color.TRANSPARENT)
             isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
-            cacheColorHint = Color.TRANSPARENT
+            cacheColorHint = pal.canvas
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength(dp(40))
         }
         val adapter = object : BaseAdapter() {
             override fun getCount() = shown.size
@@ -1525,6 +1625,7 @@ class MainActivity : Activity() {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
                 val item = (convertView as? AppItem) ?: AppItem(this@MainActivity)
                 item.bind(shown[position])
+                popIn(item, if (position < 8) position * 50L else 0L)
                 return item
             }
         }
@@ -1539,7 +1640,7 @@ class MainActivity : Activity() {
         fun addSite() {
             val d = Store.cleanDomain(urlInput.text.toString())
             if (d == null) {
-                Toast.makeText(this, "Type a site like reddit.com", Toast.LENGTH_SHORT).show()
+                toast("Type a site like reddit.com")
                 return
             }
             Store.addSite(this, d)
@@ -1620,9 +1721,9 @@ class MainActivity : Activity() {
         return page
     }
 
-    private fun statTile(n: String, l: String): View = LinearLayout(this).apply {
+    private fun statTile(n: Int, l: String): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        addView(display(n, 30f))
+        addView(OdometerView(this@MainActivity, pal.ink, fonts.bold, 28f).apply { setValue(n) })
         addView(tv(l, 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(4), 0, 0) })
     }
 
@@ -1691,13 +1792,13 @@ class MainActivity : Activity() {
         charts = ArrayList()
 
         val week = (0..6).map { Store.blockedOn(this, it) }.sum()
-        val tiles = card().apply { setPadding(dp(20), dp(20), dp(20), dp(20)) }
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(statTile(Store.today(this).toString(), "Today"), lp(0, wrapC, 1f))
-        row.addView(statTile(week.toString(), "This week"), lp(0, wrapC, 1f))
-        row.addView(statTile(Store.total(this).toString(), "All time"), lp(0, wrapC, 1f))
-        tiles.addView(row)
-        col.addView(tiles, lp(matchP, wrapC).apply { topMargin = dp(12) })
+        listOf(Store.today(this) to "Today", week to "This week", Store.total(this) to "All time").forEachIndexed { i, p ->
+            val tile = card().apply { setPadding(dp(14), dp(16), dp(14), dp(16)) }
+            tile.addView(statTile(p.first, p.second))
+            row.addView(tile, lp(0, wrapC, 1f).apply { if (i > 0) marginStart = dp(8) })
+        }
+        col.addView(row, lp(matchP, wrapC).apply { topMargin = dp(12) })
 
         col.addView(sectionTitle("Distractions blocked"))
         val c1 = card().apply { setPadding(dp(20), dp(20), dp(20), dp(18)) }
@@ -1990,7 +2091,7 @@ class MainActivity : Activity() {
             snooze.addView(pill(name, false) {
                 if (free()) {
                     Store.setSnooze(this, System.currentTimeMillis() + mins * 60_000L)
-                    Toast.makeText(this, "Always-on blocking paused for $name", Toast.LENGTH_SHORT).show()
+                    toast("Always-on blocking paused for $name")
                 }
             }, lp(0, wrapC, 1f).apply { if (i < 2) marginEnd = dp(8) })
         }
@@ -2027,7 +2128,7 @@ class MainActivity : Activity() {
                 startActivity(Intent().setComponent(ComponentName(
                     "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")))
             } catch (e: Exception) {
-                Toast.makeText(this, "Open Security > Permissions > Autostart and switch Shortstop on.", Toast.LENGTH_LONG).show()
+                toast("Open Security > Permissions > Autostart and switch Shortstop on.")
             }
         })
         col.addView(fix, lp(matchP, wrapC))

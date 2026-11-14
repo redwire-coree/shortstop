@@ -272,16 +272,26 @@ class DotGridView(ctx: Context, private val dot: Int, private val hot: Int) : Vi
     }
 }
 
-/** A card with a soft light that follows your finger (react-bits SpotlightCard). */
+/**
+ * Bento card (react-bits MagicBento): soft light that follows your finger, an edge light on the border,
+ * and a ring that ripples out on tap.
+ */
 class GlowCard(ctx: Context, private val glow: Int, private val corner: Float, private val size: Float) :
     LinearLayout(ctx) {
     private var gx = 0f
     private var gy = 0f
     private var amt = 0f
+    private var wave = 1f
+    private var wx = 0f
+    private var wy = 0f
     private var anim: ValueAnimator? = null
+    private var waveAnim: ValueAnimator? = null
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = ctx.px(1.5f) }
+    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = ctx.px(2f) }
     private val clip = Path()
     private val rect = RectF()
+    private val er = RectF()
 
     init { setWillNotDraw(false) }
 
@@ -294,33 +304,59 @@ class GlowCard(ctx: Context, private val glow: Int, private val corner: Float, p
         }
     }
 
+    private fun ripple(x: Float, y: Float) {
+        waveAnim?.cancel()
+        wx = x; wy = y; wave = 0f
+        waveAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 700
+            addUpdateListener { wave = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
     override fun dispatchTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { gx = e.x; gy = e.y; fade(1f) }
+            MotionEvent.ACTION_DOWN -> { gx = e.x; gy = e.y; fade(1f); ripple(e.x, e.y) }
             MotionEvent.ACTION_MOVE -> { gx = e.x; gy = e.y; invalidate() }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> fade(0f)
         }
         return super.dispatchTouchEvent(e)
     }
 
+    private fun tint(alpha: Int) = Color.argb(alpha.coerceIn(0, 255), Color.red(glow), Color.green(glow), Color.blue(glow))
+
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
-        if (amt < 0.01f) return
-        val a = (Color.alpha(glow) * amt).toInt().coerceIn(0, 255)
-        val core = Color.argb(a, Color.red(glow), Color.green(glow), Color.blue(glow))
-        val none = Color.argb(0, Color.red(glow), Color.green(glow), Color.blue(glow))
-        paint.shader = RadialGradient(gx, gy, size, core, none, Shader.TileMode.CLAMP)
+        val live = amt >= 0.01f
+        val waving = wave < 1f
+        if (!live && !waving) return
         rect.set(0f, 0f, width.toFloat(), height.toFloat())
         clip.reset()
         clip.addRoundRect(rect, corner, corner, Path.Direction.CW)
         c.save()
         c.clipPath(clip)
-        c.drawRect(rect, paint)
+        if (live) {
+            val a = (Color.alpha(glow) * amt).toInt()
+            paint.shader = RadialGradient(gx, gy, size, tint(a), tint(0), Shader.TileMode.CLAMP)
+            c.drawRect(rect, paint)
+        }
+        if (waving) {
+            ring.color = tint((Color.alpha(glow) * 5 * (1f - wave)).toInt())
+            c.drawCircle(wx, wy, size * 0.9f * wave, ring)
+        }
         c.restore()
+        if (live) {
+            er.set(0.75f, 0.75f, width - 0.75f, height - 0.75f)
+            edge.shader = RadialGradient(
+                gx, gy, size * 0.8f, tint((Color.alpha(glow) * 7 * amt).toInt()), tint(0), Shader.TileMode.CLAMP
+            )
+            c.drawRoundRect(er, corner, corner, edge)
+        }
     }
 
     override fun onDetachedFromWindow() {
         anim?.cancel()
+        waveAnim?.cancel()
         super.onDetachedFromWindow()
     }
 }

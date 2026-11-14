@@ -51,113 +51,10 @@ class Wall(
         text = t; textSize = sp; typeface = face; setTextColor(color); gravity = Gravity.CENTER
     }
 
-    /** Press-and-hold pill that fills while held. Releasing early drains it back. */
-    private inner class HoldButton(context: Context) : View(context) {
-        private var progress = 0f
-        private var anim: ValueAnimator? = null
-        private var done = false
-        private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.surface }
-        private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = pal.border; style = Paint.Style.STROKE; strokeWidth = dp(1).toFloat()
-        }
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink }
-        private val dark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = pal.ink; typeface = fonts.semi; textAlign = Paint.Align.CENTER
-        }
-        private val light = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = pal.canvas; typeface = fonts.semi; textAlign = Paint.Align.CENTER
-        }
-        private val rect = RectF()
-        private val clip = Path()
-
-        override fun onMeasure(w: Int, h: Int) {
-            setMeasuredDimension(MeasureSpec.getSize(w), dp(60))
-        }
-
-        private fun caption(): String {
-            if (done) return "Opening…"
-            if (progress <= 0f) return "Hold to open · ${holdSec}s"
-            val left = Math.ceil(((1f - progress) * holdSec).toDouble()).toInt()
-            return "Keep holding · ${maxOf(1, left)}s"
-        }
-
-        override fun onDraw(c: Canvas) {
-            val w = width.toFloat()
-            val h = height.toFloat()
-            val r = h / 2f
-            rect.set(0f, 0f, w, h)
-            c.drawRoundRect(rect, r, r, bg)
-
-            val cx = w / 2f
-            dark.textSize = dp(15).toFloat()
-            light.textSize = dp(15).toFloat()
-            val cy = h / 2f - (dark.ascent() + dark.descent()) / 2f
-            c.drawText(caption(), cx, cy, dark)
-
-            if (progress > 0f) {
-                c.save()
-                clip.reset()
-                clip.addRoundRect(rect, r, r, Path.Direction.CW)
-                c.clipPath(clip)
-                c.drawRect(0f, 0f, w * progress, h, fill)
-                c.clipRect(0f, 0f, w * progress, h)
-                c.drawText(caption(), cx, cy, light)
-                c.restore()
-            }
-            rect.inset(dp(1) / 2f, dp(1) / 2f)
-            c.drawRoundRect(rect, r, r, edge)
-        }
-
-        private fun animateTo(target: Float, ms: Long, onEnd: (() -> Unit)? = null) {
-            anim?.cancel()
-            val a = ValueAnimator.ofFloat(progress, target)
-            a.duration = ms
-            a.interpolator = if (target >= 1f) LinearInterpolator() else DecelerateInterpolator()
-            a.addUpdateListener { progress = it.animatedValue as Float; invalidate() }
-            var cancelled = false
-            a.addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationCancel(animation: Animator) { cancelled = true }
-                override fun onAnimationEnd(animation: Animator) {
-                    if (!cancelled) onEnd?.invoke()
-                }
-            })
-            anim = a
-            a.start()
-        }
-
-        override fun onTouchEvent(e: MotionEvent): Boolean {
-            if (done) return true
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    parent?.requestDisallowInterceptTouchEvent(true)
-                    animate().scaleX(0.97f).scaleY(0.97f).setDuration(90).start()
-                    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    animateTo(1f, maxOf(200L, (holdSec * 1000L * (1f - progress)).toLong())) {
-                        done = true
-                        progress = 1f
-                        invalidate()
-                        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        postDelayed({ onPass() }, 200)
-                    }
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    animate().scaleX(1f).scaleY(1f).setDuration(180).setInterpolator(OvershootInterpolator()).start()
-                    animateTo(0f, 320)
-                }
-            }
-            return true
-        }
-
-        override fun onDetachedFromWindow() {
-            anim?.cancel()
-            super.onDetachedFromWindow()
-        }
-    }
-
     private fun build(): FrameLayout {
         val frame = FrameLayout(ctx).apply { setBackgroundColor(pal.canvas) }
         frame.addView(
-            DotGridView(ctx, pal.border, pal.ink),
+            SilkView(ctx, pal.canvas, pal.dark),
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
         val col = LinearLayout(ctx).apply {
@@ -180,7 +77,7 @@ class Wall(
             17f, fonts.regular, pal.ink
         )
         val hint = tv("Hold the button to open it for $passMin min.", 14f, fonts.regular, pal.muted)
-        val hold = HoldButton(ctx)
+        val hold = HoldPill(ctx, pal, fonts, holdSec) { onPass() }
         val leave = tv("Not now", 15f, fonts.semi, pal.ink).apply {
             background = GradientDrawable().apply {
                 setColor(pal.canvas); setStroke(dp(1), pal.border); cornerRadius = dp(40).toFloat()
