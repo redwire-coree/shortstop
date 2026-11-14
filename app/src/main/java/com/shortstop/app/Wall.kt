@@ -35,8 +35,11 @@ class Wall(
     private val holdSec: Int,
     private val passMin: Int,
     private val onPass: () -> Unit,
-    private val onLeave: () -> Unit
+    private val onLeave: () -> Unit,
+    private val cover: Boolean = false,
+    private val coverText: () -> String = { "" }
 ) {
+    private val tickHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var root: FrameLayout? = null
     private val pal = Palette(ctx)
@@ -159,6 +162,8 @@ class Wall(
             setPadding(dp(28), dp(24), dp(28), dp(24))
         }
 
+        if (cover) return buildCover(frame, col)
+
         val tile = tv(title.take(1).uppercase(), 24f, fonts.bold, pal.canvas).apply {
             background = GradientDrawable().apply { setColor(pal.ink); cornerRadius = dp(22).toFloat() }
         }
@@ -195,6 +200,40 @@ class Wall(
         return frame
     }
 
+    /** Focus cover: shown over the home screen while a session runs. No hold button, just the timer. */
+    private fun buildCover(frame: FrameLayout, col: LinearLayout): FrameLayout {
+        val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+        val match = ViewGroup.LayoutParams.MATCH_PARENT
+        val tile = tv("F", 24f, fonts.bold, pal.canvas).apply {
+            background = GradientDrawable().apply { setColor(pal.ink); cornerRadius = dp(22).toFloat() }
+        }
+        val head = tv("Focus.", 48f, fonts.bold, pal.ink).apply { letterSpacing = -0.02f }
+        val sub = tv(
+            if (message.isNotBlank()) message else "Your blocked apps are closed. Stay with it.",
+            17f, fonts.regular, pal.ink
+        )
+        val time = tv(coverText(), 28f, fonts.bold, pal.ink)
+        val open = tv("Open Shortstop", 15f, fonts.semi, pal.canvas).apply {
+            background = GradientDrawable().apply { setColor(pal.ink); cornerRadius = dp(40).toFloat() }
+            setPadding(dp(28), dp(14), dp(28), dp(14))
+            setOnClickListener { onLeave() }
+        }
+        col.addView(tile, LinearLayout.LayoutParams(dp(64), dp(64)))
+        col.addView(head, LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dp(24); bottomMargin = dp(10) })
+        col.addView(sub, LinearLayout.LayoutParams(match, wrap).apply { bottomMargin = dp(20) })
+        col.addView(time, LinearLayout.LayoutParams(wrap, wrap).apply { bottomMargin = dp(28) })
+        col.addView(open, LinearLayout.LayoutParams(wrap, wrap))
+        frame.addView(col, FrameLayout.LayoutParams(match, wrap, Gravity.CENTER))
+        val tick = object : Runnable {
+            override fun run() {
+                time.text = coverText()
+                tickHandler.postDelayed(this, 1000)
+            }
+        }
+        tickHandler.postDelayed(tick, 1000)
+        return frame
+    }
+
     fun show(): Boolean {
         if (root != null) return true
         return try {
@@ -221,6 +260,7 @@ class Wall(
     }
 
     fun dismiss() {
+        tickHandler.removeCallbacksAndMessages(null)
         val v = root ?: return
         root = null
         try {

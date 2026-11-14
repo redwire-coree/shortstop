@@ -124,6 +124,19 @@ object Store {
     }
 
     /** True when blocking should be running right now. Always true when no schedule is set. */
+    private fun inWindow(startM: Int, endM: Int, days: Int, now: Calendar): Boolean {
+        val dow = (now.get(Calendar.DAY_OF_WEEK) + 5) % 7
+        val prev = (dow + 6) % 7
+        val t = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+        val today = ((days shr dow) and 1) == 1
+        val yesterday = ((days shr prev) and 1) == 1
+        return when {
+            startM == endM -> false
+            startM < endM -> today && t >= startM && t < endM
+            else -> (today && t >= startM) || (yesterday && t < endM)
+        }
+    }
+
     fun inSchedule(c: Context, now: Calendar = Calendar.getInstance()): Boolean {
         if (!scheduleOn(c)) return true
         val dow = (now.get(Calendar.DAY_OF_WEEK) + 5) % 7 // Mon = 0 ... Sun = 6
@@ -296,4 +309,188 @@ object Store {
     /** Taps "Skip" on YouTube video ads for you. */
     fun autoSkip(c: Context) = p(c).getBoolean("autoskip", false)
     fun setAutoSkip(c: Context, v: Boolean) = p(c).edit().putBoolean("autoskip", v).apply()
+
+    // =====================================================================
+    // Focus mode (timer sessions, breaks, strict mode, schedules, goal)
+    // =====================================================================
+    data class Session(val start: Long, val minutes: Int, val tag: String, val done: Boolean)
+    data class FocusSchedule(val id: String, val name: String, val start: Int, val end: Int, val days: Int, val on: Boolean)
+
+    val TAGS = listOf("Study", "Work", "Read", "Fitness", "Other")
+
+    fun goalMin(c: Context) = p(c).getInt("goal", 240)
+    fun setGoalMin(c: Context, v: Int) = p(c).edit().putInt("goal", v.coerceIn(30, 960)).apply()
+
+    // Ultra Focus options
+    fun strictDefault(c: Context) = p(c).getBoolean("u_strict", false)
+    fun setStrictDefault(c: Context, v: Boolean) = p(c).edit().putBoolean("u_strict", v).apply()
+    fun studyMode(c: Context) = p(c).getBoolean("u_study", false)
+    fun setStudyMode(c: Context, v: Boolean) = p(c).edit().putBoolean("u_study", v).apply()
+    fun uninstallGuard(c: Context) = p(c).getBoolean("u_guard", false)
+    fun setUninstallGuard(c: Context, v: Boolean) = p(c).edit().putBoolean("u_guard", v).apply()
+    fun blockNotifs(c: Context) = p(c).getBoolean("u_notif", false)
+    fun setBlockNotifs(c: Context, v: Boolean) = p(c).edit().putBoolean("u_notif", v).apply()
+    fun blockHome(c: Context) = p(c).getBoolean("u_home", false)
+    fun setBlockHome(c: Context, v: Boolean) = p(c).edit().putBoolean("u_home", v).apply()
+
+    // Last-used session choices
+    fun lastMinutes(c: Context) = p(c).getInt("last_min", 25)
+    fun lastTag(c: Context) = p(c).getString("last_tag", "Study") ?: "Study"
+    fun lastBreaks(c: Context) = p(c).getInt("last_breaks", 2)
+    fun lastBreakMin(c: Context) = p(c).getInt("last_break_min", 5)
+    fun rememberSession(c: Context, minutes: Int, tag: String, breaks: Int, breakMin: Int) {
+        p(c).edit().putInt("last_min", minutes).putString("last_tag", tag)
+            .putInt("last_breaks", breaks).putInt("last_break_min", breakMin).apply()
+    }
+
+    // Apps closed during focus
+    fun focusApps(c: Context): Set<String> = HashSet(p(c).getStringSet("fapps", emptySet()) ?: emptySet())
+    fun isFocusApp(c: Context, pkg: String) = focusApps(c).contains(pkg)
+    fun setFocusApp(c: Context, pkg: String, on: Boolean) {
+        val s = focusApps(c).toMutableSet()
+        if (on) s.add(pkg) else s.remove(pkg)
+        p(c).edit().putStringSet("fapps", s).apply()
+    }
+
+    // Running session
+    fun focusEnd(c: Context) = p(c).getLong("f_end", 0L)
+    fun focusStart(c: Context) = p(c).getLong("f_start", 0L)
+    fun focusPlanned(c: Context) = p(c).getInt("f_min", 0)
+    fun focusTag(c: Context) = p(c).getString("f_tag", "") ?: ""
+    fun focusStrict(c: Context) = p(c).getBoolean("f_strict", false)
+    fun breaksLeft(c: Context) = p(c).getInt("f_bleft", 0)
+    fun breakUntil(c: Context) = p(c).getLong("f_bu", 0L)
+    private fun breakTotalMs(c: Context) = p(c).getLong("f_bt", 0L)
+
+    fun focusRunning(c: Context) = focusEnd(c) > System.currentTimeMillis()
+    fun onBreak(c: Context) = breakUntil(c) > System.currentTimeMillis()
+    fun focusLeftMs(c: Context) = maxOf(0L, focusEnd(c) - System.currentTimeMillis())
+    fun focusLeftMin(c: Context) = ((focusLeftMs(c) + 59_999L) / 60_000L).toInt()
+
+    /** True while the settings are frozen: a strict session is running. */
+    fun frozen(c: Context) = System.currentTimeMillis() < lockUntil(c)
+
+    /** True when focus blocking is in force: a session (not on break) or an active focus schedule. */
+    fun hard(c: Context): Boolean = (focusRunning(c) && !onBreak(c)) || scheduleActive(c) != null
+
+    fun startFocus(c: Context, minutes: Int, tag: String, strict: Boolean, breaks: Int, breakMin: Int) {
+        val now = System.currentTimeMillis()
+        val end = now + minutes * 60_000L
+        p(c).edit()
+            .putLong("f_start", now).putLong("f_end", end).putInt("f_min", minutes)
+            .putString("f_tag", tag).putBoolean("f_strict", strict)
+            .putInt("f_bleft", breaks).putInt("f_blen", breakMin)
+            .putLong("f_bu", 0L).putLong("f_bt", 0L)
+            .putLong("lock_until", if (strict) end else 0L)
+            .apply()
+        rememberSession(c, minutes, tag, breaks, breakMin)
+    }
+
+    fun startBreak(c: Context): Boolean {
+        if (!focusRunning(c) || onBreak(c) || breaksLeft(c) <= 0) return false
+        val ms = p(c).getInt("f_blen", 5) * 60_000L
+        val now = System.currentTimeMillis()
+        val newEnd = focusEnd(c) + ms
+        val e = p(c).edit()
+            .putInt("f_bleft", breaksLeft(c) - 1)
+            .putLong("f_bu", now + ms)
+            .putLong("f_end", newEnd)
+            .putLong("f_bt", breakTotalMs(c) + ms)
+        if (focusStrict(c)) e.putLong("lock_until", newEnd)
+        e.apply()
+        return true
+    }
+
+    fun endBreak(c: Context) = p(c).edit().putLong("f_bu", 0L).apply()
+
+    fun isKnownApp(pkg: String) = PACKAGES.containsKey(pkg)
+
+    /** Ends a session early. Not allowed while strict mode is on. */
+    fun endFocusEarly(c: Context): Boolean {
+        if (!focusRunning(c) || frozen(c)) return false
+        recordSession(c, false)
+        clearFocus(c)
+        return true
+    }
+
+    /** Call often: closes out a session whose time is up. Returns true when it just finished. */
+    fun finalizeFocus(c: Context): Boolean {
+        val end = focusEnd(c)
+        if (end == 0L || end > System.currentTimeMillis()) return false
+        recordSession(c, true)
+        clearFocus(c)
+        return true
+    }
+
+    private fun clearFocus(c: Context) {
+        p(c).edit().putLong("f_end", 0L).putLong("f_start", 0L).putLong("f_bu", 0L).putLong("lock_until", 0L).apply()
+    }
+
+    private fun recordSession(c: Context, completed: Boolean) {
+        val start = focusStart(c)
+        if (start == 0L) return
+        val now = System.currentTimeMillis()
+        val planned = focusPlanned(c)
+        val mins = if (completed) planned
+        else minOf(planned, maxOf(0L, (now - start - breakTotalMs(c)) / 60_000L).toInt())
+        if (mins <= 0) return
+        val cal = Calendar.getInstance().apply { timeInMillis = start }
+        val k = "focus_${keyOf(cal)}"
+        val sp = p(c)
+        sp.edit().putInt(k, sp.getInt(k, 0) + mins).apply()
+        addSession(c, Session(start, mins, focusTag(c), completed))
+    }
+
+    fun focusMinutesOn(c: Context, cal: Calendar) = p(c).getInt("focus_${keyOf(cal)}", 0)
+    fun focusMinutesAgo(c: Context, ago: Int) = focusMinutesOn(c, daysAgo(ago))
+
+    fun sessions(c: Context): List<Session> {
+        val raw = p(c).getString("sessions", "") ?: ""
+        return raw.split('\n').mapNotNull { line ->
+            val a = line.split(',')
+            if (a.size < 4) return@mapNotNull null
+            val s = a[0].toLongOrNull()
+            val m = a[1].toIntOrNull()
+            if (s == null || m == null) null else Session(s, m, a[2], a[3] == "1")
+        }
+    }
+
+    private fun addSession(c: Context, s: Session) {
+        val keep = (sessions(c) + s).takeLast(300)
+        val text = keep.joinToString("\n") {
+            "${it.start},${it.minutes},${it.tag.replace(',', ' ').replace('\n', ' ')},${if (it.done) 1 else 0}"
+        }
+        p(c).edit().putString("sessions", text).apply()
+    }
+
+    /** Sessions that started on the given day. */
+    fun sessionsOn(c: Context, cal: Calendar): List<Session> {
+        val k = keyOf(cal)
+        return sessions(c).filter { keyOf(Calendar.getInstance().apply { timeInMillis = it.start }) == k }
+    }
+
+    // ---- focus schedules ----
+    fun schedules(c: Context): List<FocusSchedule> {
+        val raw = p(c).getString("fscheds", "") ?: ""
+        return raw.split('\n').mapNotNull { line ->
+            val a = line.split('|')
+            if (a.size < 6) return@mapNotNull null
+            val st = a[2].toIntOrNull()
+            val en = a[3].toIntOrNull()
+            val dy = a[4].toIntOrNull()
+            if (st == null || en == null || dy == null) null else FocusSchedule(a[0], a[1], st, en, dy, a[5] == "1")
+        }
+    }
+
+    fun saveSchedules(c: Context, list: List<FocusSchedule>) {
+        val text = list.joinToString("\n") {
+            "${it.id}|${it.name.replace('|', ' ').replace('\n', ' ')}|${it.start}|${it.end}|${it.days}|${if (it.on) 1 else 0}"
+        }
+        p(c).edit().putString("fscheds", text).apply()
+    }
+
+    fun scheduleActive(c: Context): FocusSchedule? {
+        val now = Calendar.getInstance()
+        return schedules(c).firstOrNull { it.on && inWindow(it.start, it.end, it.days, now) }
+    }
 }

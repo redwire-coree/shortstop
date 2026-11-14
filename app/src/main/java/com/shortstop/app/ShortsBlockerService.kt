@@ -35,6 +35,9 @@ class ShortsBlockerService : AccessibilityService() {
     private var wallKey: String? = null
 
     // Cached copies so busy apps don't make us re-read preferences on every event.
+    private var focusCache: Set<String> = emptySet()
+    private var hardVal = false
+    private var hardAt = 0L
     private var appsCache: Set<String> = emptySet()
     private var sitesCache: List<String> = emptyList()
     private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> reloadCache() }
@@ -46,7 +49,39 @@ class ShortsBlockerService : AccessibilityService() {
 
     private fun reloadCache() {
         appsCache = Store.blockedApps(this)
+        focusCache = Store.focusApps(this)
         sitesCache = Store.blockedSites(this)
+        hardAt = 0L
+    }
+
+    /** Focus blocking in force (session or schedule). Cached for a few seconds. */
+    private fun hard(): Boolean {
+        val n = SystemClock.uptimeMillis()
+        if (n - hardAt > 3000) {
+            hardVal = Store.hard(this)
+            hardAt = n
+        }
+        return hardVal
+    }
+
+    private val launcherPkg: String? by lazy {
+        try {
+            val i = android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_HOME)
+            packageManager.resolveActivity(i, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName
+        } catch (e: Exception) { null }
+    }
+
+    private fun focusLeftText(): String {
+        if (Store.focusRunning(this)) {
+            val sec = Store.focusLeftMs(this) / 1000
+            val h = sec / 3600
+            val m = (sec % 3600) / 60
+            val x = sec % 60
+            return if (h > 0) String.format("%d:%02d:%02d", h, m, x) else String.format("%02d:%02d", m, x)
+        }
+        return Store.scheduleActive(this)?.name ?: "Focus schedule"
     }
 
     override fun onServiceConnected() {
@@ -57,6 +92,10 @@ class ShortsBlockerService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val pkg = event?.packageName?.toString() ?: return
+        if (Store.finalizeFocus(this)) {
+            hardAt = 0L
+            Toast.makeText(this, "Focus session complete. Well done.", Toast.LENGTH_LONG).show()
+        }
         if (wall != null) return
 
         val now = SystemClock.uptimeMillis()
@@ -74,10 +113,33 @@ class ShortsBlockerService : AccessibilityService() {
             return
         }
 
-        // 2. Any app the person picked
-        if (pkg in appsCache) {
+        val hardNow = hard()
+
+        // 1b. Uninstall protection: keep Settings away from Shortstop while focus is on
+        if (hardNow && Store.uninstallGuard(this) && pkg in SETTINGS_PKGS && now - lastBlock > 700) {
+            val root = rootInActiveWindow
+            if (root != null && mentionsUs(root)) {
+                lastBlock = now
+                performGlobalAction(GLOBAL_ACTION_HOME)
+                Toast.makeText(this, "Uninstall protection is on during focus", Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+
+        // 1c. Block the home screen: cover the launcher with the focus timer
+        if (hardNow && Store.blockHome(this) && pkg == launcherPkg &&
+            event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        ) {
+            showCover(pkg)
+            return
+        }
+
+        // 2. Any app the person picked (always-on list, or the focus list during focus)
+        val studyYoutube = hardNow && Store.studyMode(this) && pkg == "com.google.android.youtube"
+        val inFocus = hardNow && pkg in focusCache && !studyYoutube
+        if (pkg in appsCache || inFocus) {
             val key = Store.appKey(pkg)
-            if (Store.locked(this) || Store.isActive(this, key)) {
+            if (inFocus || Store.isActive(this, key)) {
                 handleHit(null, key, pkg)
                 return
             }
@@ -91,7 +153,7 @@ class ShortsBlockerService : AccessibilityService() {
                 val d = blockedDomainOn(pkg, root)
                 if (d != null) {
                     val key = Store.webKey(d)
-                    if (Store.locked(this) || Store.isActive(this, key)) {
+                    if (hardNow || Store.isActive(this, key)) {
                         handleHit(null, key, pkg)
                         return
                     }
@@ -156,22 +218,28 @@ class ShortsBlockerService : AccessibilityService() {
 
     /** Which blocked key (if any) is on screen right now for this app. */
     private fun findHit(site: String, pkg: String): String? {
-        val locked = Store.locked(this)
+        val hardNow = hard()
         val whole = Store.wholeKey(site)
-        val keys = Store.keysFor(site).filter { Store.isActive(this, it) }
-        if (!locked && keys.isEmpty()) return null
+        val studyYoutube = hardNow && Store.studyMode(this) && site == "youtube"
+        val keys = Store.keysFor(site).filter { Store.isActive(this, it) }.toMutableList()
+        if (studyYoutube) {
+            if ("youtube" !in keys) keys.add("youtube")
+            if ("youtube_home" !in keys) keys.add("youtube_home")
+        }
+        val focusWhole = hardNow && pkg in focusCache && !studyYoutube
+        if (!focusWhole && keys.isEmpty()) return null
 
         val root = rootInActiveWindow ?: return null
         if (root.packageName?.toString() != pkg) return null
 
-        if (locked) return whole
+        if (focusWhole) return whole
         if (whole in keys) return whole
         if (site == "tiktok" && site in keys) return site
         return scan(keys.filter { it != whole }, root)
     }
 
     private fun handleHit(site: String?, key: String, pkg: String) {
-        val locked = Store.locked(this)
+        val locked = hard()
         if (!locked) {
             val isFeed = site != null && key == site && site != "tiktok"
             if (isFeed && site != null) {
@@ -199,6 +267,43 @@ class ShortsBlockerService : AccessibilityService() {
         } catch (e: Exception) { key.removePrefix("app:") }
         key.startsWith("web:") -> key.removePrefix("web:")
         else -> Store.label(key)
+    }
+
+    private fun mentionsUs(root: AccessibilityNodeInfo): Boolean {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 300) {
+            val n = queue.removeFirst()
+            seen++
+            val t = n.text?.toString()
+            val d = n.contentDescription?.toString()
+            if ((t != null && t.contains("Shortstop", true)) || (d != null && d.contains("Shortstop", true))) return true
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
+        return false
+    }
+
+    private fun showCover(pkg: String) {
+        val w = Wall(
+            this, "Focus", Store.message(this), 0, 0,
+            onPass = {},
+            onLeave = {
+                closeWall()
+                lastBlock = SystemClock.uptimeMillis()
+                val i = android.content.Intent(this, MainActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+            },
+            cover = true,
+            coverText = { focusLeftText() }
+        )
+        if (!w.show()) return
+        wall = w
+        wallPkg = pkg
+        wallKey = COVER_KEY
+        handler.removeCallbacks(wallWatch)
+        handler.postDelayed(wallWatch, 700)
     }
 
     // ---------- wall ----------
@@ -258,7 +363,9 @@ class ShortsBlockerService : AccessibilityService() {
                 if (blockedDomainOn(pkg, root) != key.removePrefix("web:")) gone = true
             } else if (!simple && site != null && scan(listOf(key), root) == null) gone = true
         }
-        if (Store.locked(this)) gone = true // a lock started: the lock rules take over
+        if (key == COVER_KEY) {
+            if (!hard() || now != launcherPkg) gone = true
+        } else if (hard()) gone = true // focus started: the focus rules take over
         if (gone) {
             closeWall()
             lastBlock = SystemClock.uptimeMillis()
@@ -283,7 +390,7 @@ class ShortsBlockerService : AccessibilityService() {
         val root = rootInActiveWindow
         val pkg = root?.packageName?.toString()
         val stillThere = root != null && pkg != null && Store.siteFor(pkg) == site &&
-            Store.isActive(this, site) && !Store.locked(this) &&
+            Store.isActive(this, site) && !hard() &&
             (site == "tiktok" || scan(listOf(site), root) != null)
         if (!stillThere) {
             tracking = null
@@ -317,7 +424,7 @@ class ShortsBlockerService : AccessibilityService() {
 
         val label = labelFor(key)
         val msg = when {
-            locked -> "Focus lock: ${Store.lockLeftMin(this)} min left"
+            locked -> "Focus · ${focusLeftText()}"
             allowanceUsedUp -> "Daily allowance used up for $label"
             else -> "Shortstop blocked $label"
         }
@@ -376,6 +483,14 @@ class ShortsBlockerService : AccessibilityService() {
     }
 
     companion object {
+        private const val COVER_KEY = "cover:home"
+
+        private val SETTINGS_PKGS = setOf(
+            "com.android.settings", "com.miui.securitycenter", "com.android.packageinstaller",
+            "com.google.android.packageinstaller", "com.samsung.android.packageinstaller",
+            "com.miui.packageinstaller", "com.samsung.android.settings"
+        )
+
         /** URL-bar view IDs of common browsers (used to spot blocked websites). */
         private val BROWSER_IDS = mapOf(
             "com.android.chrome" to listOf("com.android.chrome:id/url_bar"),
