@@ -21,7 +21,15 @@ class RingView(
     private val strokeDp: Int = 14,
     private val showText: Boolean = true
 ) : View(ctx) {
+    private val roll = RollPainter(this)
     var big: String = ""
+        set(value) {
+            if (field != value) {
+                roll.set(value, field.isNotEmpty() && isAttachedToWindow && width > 0)
+                field = value
+                invalidate()
+            }
+        }
     var small: String = ""
     private var progress = 0f
     private var anim: ValueAnimator? = null
@@ -73,7 +81,7 @@ class RingView(
             bigPaint.textSize = width * 0.2f
             smallPaint.textSize = width * 0.062f
             val cy = height / 2f
-            c.drawText(big, width / 2f, cy + bigPaint.textSize * 0.2f, bigPaint)
+            roll.draw(c, bigPaint, width / 2f, cy + bigPaint.textSize * 0.2f)
             if (small.isNotEmpty()) c.drawText(small, width / 2f, cy + bigPaint.textSize * 0.2f + smallPaint.textSize * 2.0f, smallPaint)
         }
     }

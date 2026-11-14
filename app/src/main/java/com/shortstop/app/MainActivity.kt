@@ -254,7 +254,10 @@ class MainActivity : Activity() {
         v.background = round(if (primary) pal.ink else pal.canvas, 40, pal.border, if (primary) 0 else dp(1))
     }
 
-    private fun card(): LinearLayout = LinearLayout(this).apply {
+    private fun card(): LinearLayout = GlowCard(
+        this, Color.argb(if (pal.dark) 26 else 20, Color.red(pal.ink), Color.green(pal.ink), Color.blue(pal.ink)),
+        dp(24).toFloat(), dp(170).toFloat()
+    ).apply {
         orientation = LinearLayout.VERTICAL
         background = round(pal.surface, 24, pal.border, dp(1))
         setPadding(dp(20), dp(6), dp(20), dp(6))
@@ -550,10 +553,13 @@ class MainActivity : Activity() {
         }
         rootView.addView(nav, lp(matchP, wrapC))
         rootFrame.addView(rootView, FrameLayout.LayoutParams(matchP, matchP))
+        spark = SparkLayer(this, pal.ink)
+        rootFrame.addView(spark, FrameLayout.LayoutParams(matchP, matchP))
         setContentView(rootFrame)
         styleNav()
         refreshStatus()
         updateRunning()
+        stagger(pages[tab])
     }
 
     private fun styleNav() {
@@ -573,16 +579,74 @@ class MainActivity : Activity() {
         old.visibility = View.GONE
         nw.animate().cancel()
         nw.visibility = View.VISIBLE
-        nw.alpha = 0f
-        nw.translationY = dp(10).toFloat()
-        nw.animate().alpha(1f).translationY(0f).setDuration(220)
-            .setInterpolator(DecelerateInterpolator(1.4f)).start()
+        nw.alpha = 1f
+        nw.translationY = 0f
+        stagger(nw)
         styleNav()
         when (i) {
             0 -> { fillFocusStats(); refreshStatus() }
             1 -> fillSchedules()
             3 -> { fillStats(); charts.forEach { it.play() }; if (usageCol?.visibility == View.VISIBLE) fillUsage() }
         }
+    }
+
+    private val stagAnims = ArrayList<ValueAnimator>()
+
+    /** Cards of a page glide in one after another (react-bits AnimatedList). */
+    private fun stagger(page: View) {
+        stagAnims.forEach { it.cancel() }
+        stagAnims.clear()
+        var col: ViewGroup? = null
+        if (page is ViewGroup) {
+            for (i in 0 until page.childCount) {
+                val ch = page.getChildAt(i)
+                if (ch is ScrollView && ch.childCount > 0) { col = ch.getChildAt(0) as? ViewGroup; break }
+            }
+        }
+        val list = col ?: return
+        val n = minOf(list.childCount, 9)
+        for (i in 0 until n) {
+            val v = list.getChildAt(i)
+            v.alpha = 0f
+            v.translationY = dp(16).toFloat()
+            val a = ValueAnimator.ofFloat(0f, 1f)
+            a.startDelay = i * 40L
+            a.duration = 320
+            a.interpolator = DecelerateInterpolator(1.6f)
+            a.addUpdateListener {
+                val f = it.animatedValue as Float
+                v.alpha = f
+                v.translationY = (1f - f) * dp(16)
+            }
+            a.addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationCancel(animation: android.animation.Animator) {
+                    v.alpha = 1f; v.translationY = 0f
+                }
+            })
+            stagAnims.add(a)
+            a.start()
+        }
+    }
+
+    private var spark: SparkLayer? = null
+    private var downX = 0f
+    private var downY = 0f
+    private var downT = 0L
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { downX = ev.rawX; downY = ev.rawY; downT = ev.eventTime }
+            MotionEvent.ACTION_UP -> {
+                val s = spark
+                if (s != null && ev.eventTime - downT < 350 &&
+                    Math.abs(ev.rawX - downX) < dp(10) && Math.abs(ev.rawY - downY) < dp(10)) {
+                    val loc = IntArray(2)
+                    s.getLocationOnScreen(loc)
+                    s.burst(ev.rawX - loc[0], ev.rawY - loc[1])
+                }
+            }
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     private fun openFocusApps() {
@@ -647,6 +711,7 @@ class MainActivity : Activity() {
         layer.addView(scrim, FrameLayout.LayoutParams(matchP, matchP))
         layer.addView(panel, FrameLayout.LayoutParams(matchP, wrapC, Gravity.BOTTOM))
         rootFrame.addView(layer, FrameLayout.LayoutParams(matchP, matchP))
+        spark?.bringToFront()
         panel.translationY = dp(700).toFloat()
         scrim.animate().alpha(1f).setDuration(200).start()
         panel.animate().translationY(0f).setDuration(280).setInterpolator(DecelerateInterpolator(1.6f)).start()
@@ -695,7 +760,12 @@ class MainActivity : Activity() {
         val col = column()
 
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(display("Focus", 30f), lp(0, wrapC, 1f))
+        top.addView(
+            ShinyTextView(this, pal.ink, mixColor(pal.ink, pal.canvas, 0.72f)).apply {
+                text = "Focus"; textSize = 30f; typeface = fonts.bold; setTextColor(pal.ink)
+                letterSpacing = -0.02f; includeFontPadding = false
+            }, lp(0, wrapC, 1f)
+        )
         val chip = tv("", 12f, fonts.semi, pal.ink, Gravity.CENTER).apply {
             background = round(pal.canvas, 40, pal.border, dp(1))
             setPadding(dp(14), dp(7), dp(14), dp(7))

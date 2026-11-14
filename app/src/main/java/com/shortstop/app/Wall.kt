@@ -156,6 +156,10 @@ class Wall(
 
     private fun build(): FrameLayout {
         val frame = FrameLayout(ctx).apply { setBackgroundColor(pal.canvas) }
+        frame.addView(
+            DotGridView(ctx, pal.border, pal.ink),
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
         val col = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -167,7 +171,10 @@ class Wall(
         val tile = tv(title.take(1).uppercase(), 24f, fonts.bold, pal.canvas).apply {
             background = GradientDrawable().apply { setColor(pal.ink); cornerRadius = dp(22).toFloat() }
         }
-        val head = tv("Pause.", 48f, fonts.bold, pal.ink).apply { letterSpacing = -0.02f }
+        val head = ShinyTextView(ctx, pal.ink, mixColor(pal.ink, pal.canvas, 0.72f)).apply {
+            text = "Pause."; textSize = 48f; typeface = fonts.bold; setTextColor(pal.ink)
+            gravity = Gravity.CENTER; letterSpacing = -0.02f
+        }
         val sub = tv(
             if (message.isNotBlank()) message else "$title is blocked right now.",
             17f, fonts.regular, pal.ink
@@ -207,7 +214,10 @@ class Wall(
         val tile = tv("F", 24f, fonts.bold, pal.canvas).apply {
             background = GradientDrawable().apply { setColor(pal.ink); cornerRadius = dp(22).toFloat() }
         }
-        val head = tv("Focus.", 48f, fonts.bold, pal.ink).apply { letterSpacing = -0.02f }
+        val head = ShinyTextView(ctx, pal.ink, mixColor(pal.ink, pal.canvas, 0.72f)).apply {
+            text = "Focus."; textSize = 48f; typeface = fonts.bold; setTextColor(pal.ink)
+            gravity = Gravity.CENTER; letterSpacing = -0.02f
+        }
         val sub = tv(
             if (message.isNotBlank()) message else "Your blocked apps are closed. Stay with it.",
             17f, fonts.regular, pal.ink
