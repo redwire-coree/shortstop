@@ -73,11 +73,11 @@ class Wall(
             gravity = Gravity.CENTER; letterSpacing = -0.02f
         }
         val sub = tv(
-            if (message.isNotBlank()) message else "$title is blocked right now.",
+            if (message.isNotBlank()) message else "$title is off limits for now.",
             17f, fonts.regular, pal.ink
         )
-        val hint = tv("Hold the button to open it for $passMin min.", 14f, fonts.regular, pal.muted)
-        val hold = HoldPill(ctx, pal, fonts, holdSec) { onPass() }
+        val hint = tv("Hold to get $passMin min.", 14f, fonts.regular, pal.muted)
+        val hold = HoldPill(ctx, pal, fonts, { holdSec }) { onPass() }
         val leave = tv("Not now", 15f, fonts.semi, pal.ink).apply {
             background = GradientDrawable().apply {
                 setColor(pal.canvas); setStroke(dp(1), pal.border); cornerRadius = dp(40).toFloat()
@@ -116,7 +116,7 @@ class Wall(
             gravity = Gravity.CENTER; letterSpacing = -0.02f
         }
         val sub = tv(
-            if (message.isNotBlank()) message else "Your blocked apps are closed. Stay with it.",
+            if (message.isNotBlank()) message else "Blocked apps stay closed until the timer ends.",
             17f, fonts.regular, pal.ink
         )
         val time = tv(coverText(), 28f, fonts.bold, pal.ink)

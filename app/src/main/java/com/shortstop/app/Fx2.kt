@@ -65,9 +65,10 @@ class HoldPill(
     ctx: Context,
     private val pal: Palette,
     private val fonts: Fonts,
-    private val holdSec: Int,
+    private val holdSecOf: () -> Int,
     private val onDone: () -> Unit
 ) : View(ctx) {
+    private val holdSec get() = holdSecOf()
     private var progress = 0f
     private var anim: ValueAnimator? = null
     private var done = false
@@ -783,152 +784,6 @@ class SpringCheck(
     override fun onDetachedFromWindow() {
         anim?.cancel()
         super.onDetachedFromWindow()
-    }
-}
-
-// ------------------------------------------------------------------ Gooey nav
-
-/** Bottom navigation. A black pill stretches across to the picked tab and throws off a few particles. */
-class GooeyNav(
-    ctx: Context,
-    private val pal: Palette,
-    private val fonts: Fonts,
-    private val labels: List<String>,
-    initial: Int,
-    private val onTap: (Int) -> Unit
-) : View(ctx) {
-    private class P(val x0: Float, val y0: Float, val ang: Float, val dist: Float, val life: Long, val r0: Float, val t0: Long)
-
-    private var sel = initial
-    private var fromL = 0f
-    private var fromR = 0f
-    private var toL = 0f
-    private var toR = 0f
-    private var moving = false
-    private var moveStart = 0L
-    private val moveMs = 600L
-    private val ps = ArrayList<P>()
-    private val pill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink }
-    private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink }
-    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = fonts.semi; textAlign = Paint.Align.CENTER }
-    private val rect = RectF()
-    private val clip = Path()
-    private val cur = FloatArray(2)
-    private var wob = 0f
-
-    override fun onMeasure(w: Int, h: Int) {
-        setMeasuredDimension(MeasureSpec.getSize(w), context.dpf(48f).toInt())
-    }
-
-    private fun slot(i: Int, out: FloatArray) {
-        val iw = width / labels.size.toFloat()
-        val inset = context.dpf(3f)
-        out[0] = i * iw + inset
-        out[1] = (i + 1) * iw - inset
-    }
-
-    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
-        slot(sel, cur)
-        fromL = cur[0]; fromR = cur[1]; toL = cur[0]; toR = cur[1]
-        moving = false
-    }
-
-    fun select(i: Int, animate: Boolean) {
-        if (i == sel) return
-        val l0 = cur[0]
-        val r0 = cur[1]
-        sel = i
-        slot(i, cur)
-        toL = cur[0]; toR = cur[1]
-        if (!animate || width == 0) {
-            fromL = toL; fromR = toR; moving = false
-            invalidate()
-            return
-        }
-        fromL = l0; fromR = r0
-        moving = true
-        moveStart = SystemClock.uptimeMillis()
-        val cx = (toL + toR) / 2f
-        val cy = height / 2f
-        val now = moveStart
-        for (n in 0 until 15) {
-            ps.add(
-                P(
-                    cx + ((Math.random() - 0.5) * (toR - toL) * 0.6).toFloat(), cy,
-                    (Math.random() * Math.PI * 2).toFloat(),
-                    context.dpf(56f) * (0.35f + 0.65f * Math.random().toFloat()),
-                    (600 + (Math.random() - 0.5) * 600).toLong(),
-                    context.dpf(2f) + Math.random().toFloat() * context.dpf(2.5f), now
-                )
-            )
-        }
-        invalidate()
-    }
-
-    private fun compute(now: Long) {
-        if (!moving) {
-            cur[0] = toL; cur[1] = toR; wob = 0f
-            return
-        }
-        val u = ((now - moveStart) / moveMs.toFloat()).coerceIn(0f, 1f)
-        val right = toR >= fromR
-        val lead = 1f - Math.pow((1f - u).toDouble(), 2.6).toFloat()
-        val lag = u * u * (3f - 2f * u)
-        val ul = if (right) lag else lead
-        val ur = if (right) lead else lag
-        cur[0] = fromL + (toL - fromL) * ul
-        cur[1] = fromR + (toR - fromR) * ur
-        wob = if (u > 0.55f) Math.sin(((u - 0.55f) / 0.45f).toDouble() * Math.PI * 2.5).toFloat() * (1f - u) * 0.5f else 0f
-        if (u >= 1f) moving = false
-    }
-
-    override fun onDraw(c: Canvas) {
-        val now = SystemClock.uptimeMillis()
-        compute(now)
-        val h = height.toFloat()
-        val padV = context.dpf(4f)
-        val top = padV - wob * context.dpf(3f)
-        val bottom = h - padV + wob * context.dpf(3f)
-        txt.textSize = context.dpf(12f)
-        val base = h / 2f - (txt.ascent() + txt.descent()) / 2f
-        val iw = width / labels.size.toFloat()
-        txt.color = pal.muted
-        labels.forEachIndexed { i, l -> c.drawText(l, i * iw + iw / 2f, base, txt) }
-        rect.set(cur[0], top, cur[1], bottom)
-        val r = (bottom - top) / 2f
-        c.drawRoundRect(rect, r, r, pill)
-        clip.reset()
-        clip.addRoundRect(rect, r, r, Path.Direction.CW)
-        c.save()
-        c.clipPath(clip)
-        txt.color = pal.canvas
-        labels.forEachIndexed { i, l -> c.drawText(l, i * iw + iw / 2f, base, txt) }
-        c.restore()
-        val it = ps.iterator()
-        while (it.hasNext()) {
-            val p = it.next()
-            val u = ((now - p.t0).toFloat() / p.life).coerceIn(0f, 1f)
-            if (u >= 1f) { it.remove(); continue }
-            val e = 1f - (1f - u) * (1f - u)
-            dot.alpha = (255 * (1f - u)).toInt()
-            c.drawCircle(
-                p.x0 + Math.cos(p.ang.toDouble()).toFloat() * p.dist * e,
-                p.y0 + Math.sin(p.ang.toDouble()).toFloat() * p.dist * e,
-                p.r0 * (1f - u * 0.8f), dot
-            )
-        }
-        if (moving || ps.isNotEmpty()) postInvalidateOnAnimation()
-    }
-
-    override fun onTouchEvent(e: MotionEvent): Boolean {
-        when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> return true
-            MotionEvent.ACTION_UP -> {
-                val i = (e.x / (width / labels.size.toFloat())).toInt().coerceIn(0, labels.size - 1)
-                if (i != sel) onTap(i)
-            }
-        }
-        return true
     }
 }
 

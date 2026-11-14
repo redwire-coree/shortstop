@@ -318,6 +318,14 @@ object Store {
 
     val TAGS = listOf("Study", "Work", "Read", "Fitness", "Other")
 
+    fun isLoved(c: Context, start: Long) = (p(c).getStringSet("loved", emptySet()) ?: emptySet()).contains(start.toString())
+    fun lovedCount(c: Context) = (p(c).getStringSet("loved", emptySet()) ?: emptySet()).size
+    fun setLoved(c: Context, start: Long, on: Boolean) {
+        val s = HashSet(p(c).getStringSet("loved", emptySet()) ?: emptySet())
+        if (on) s.add(start.toString()) else s.remove(start.toString())
+        p(c).edit().putStringSet("loved", s).apply()
+    }
+
     fun goalMin(c: Context) = p(c).getInt("goal", 240)
     fun setGoalMin(c: Context, v: Int) = p(c).edit().putInt("goal", v.coerceIn(30, 960)).apply()
 

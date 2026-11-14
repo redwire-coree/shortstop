@@ -71,7 +71,7 @@ class MainActivity : Activity() {
     private var tab = 0
 
     // Focus tab
-    private var statusChip: TextView? = null
+    private var statusChip: CallChip? = null
     private var setupCard: View? = null
     private var runningCard: View? = null
     private var runRing: RingView? = null
@@ -245,9 +245,10 @@ class MainActivity : Activity() {
     private fun press(v: View) {
         v.setOnTouchListener { view, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.96f).scaleY(0.96f).setDuration(80).start()
+                MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.96f).scaleY(0.96f).setDuration(80)
+                    .setInterpolator(DecelerateInterpolator()).start()
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                    view.animate().scaleX(1f).scaleY(1f).setDuration(160).start()
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(SpringInterpolator(18f, 0.5f, 0.8f)).start()
             }
             false
         }
@@ -585,13 +586,16 @@ class MainActivity : Activity() {
         if (i == tab) return
         val old = pages[tab]
         val nw = pages[i]
+        val tabBefore = tab
         tab = i
         old.animate().cancel()
         old.visibility = View.GONE
         nw.animate().cancel()
         nw.visibility = View.VISIBLE
-        nw.alpha = 1f
-        nw.translationY = 0f
+        val dir = if (i > tabBefore) 1f else -1f
+        nw.alpha = 0f
+        nw.translationX = dir * dp(36)
+        nw.animate().alpha(1f).translationX(0f).setDuration(520).setInterpolator(SpringInterpolator(15f, 0.75f, 0.9f)).start()
         stagger(nw)
         styleNav()
         when (i) {
@@ -607,21 +611,23 @@ class MainActivity : Activity() {
     private fun popIn(v: View, delay: Long) {
         (v.getTag(R_POP) as? ValueAnimator)?.cancel()
         v.alpha = 0f
-        v.scaleX = 0.92f
-        v.scaleY = 0.92f
+        v.scaleX = 0.86f
+        v.scaleY = 0.86f
+        v.translationY = dp(26).toFloat()
         val a = ValueAnimator.ofFloat(0f, 1f)
         a.startDelay = delay
-        a.duration = 380
-        a.interpolator = android.view.animation.OvershootInterpolator(1.4f)
+        a.duration = 900
+        a.interpolator = SpringInterpolator(15f, 0.6f, 0.9f)
         a.addUpdateListener {
             val f = it.animatedValue as Float
-            v.alpha = f.coerceIn(0f, 1f)
-            v.scaleX = 0.92f + 0.08f * f
-            v.scaleY = 0.92f + 0.08f * f
+            v.alpha = (f * 2.4f).coerceIn(0f, 1f)
+            v.scaleX = 0.86f + 0.14f * f
+            v.scaleY = 0.86f + 0.14f * f
+            v.translationY = (1f - f) * dp(26)
         }
         a.addListener(object : android.animation.AnimatorListenerAdapter() {
             override fun onAnimationCancel(animation: android.animation.Animator) {
-                v.alpha = 1f; v.scaleX = 1f; v.scaleY = 1f
+                v.alpha = 1f; v.scaleX = 1f; v.scaleY = 1f; v.translationY = 0f
             }
         })
         v.setTag(R_POP, a)
@@ -665,6 +671,9 @@ class MainActivity : Activity() {
     }
 
     private val R_POP = 0x7f0a0001
+    private val visibleKeys = HashSet<String>()
+    private var lastPop = 0L
+    private var popIdx = 0
     private var spark: SparkLayer? = null
     private var downX = 0f
     private var downY = 0f
@@ -736,8 +745,31 @@ class MainActivity : Activity() {
             isClickable = true
         }
         val handle = View(this).apply { background = round(pal.border, 4) }
-        panel.addView(handle, lp(dp(40), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(14) })
-        panel.addView(display(title, 22f), lp(wrapC, wrapC).apply { bottomMargin = dp(8) })
+        val head = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(8)) }
+        head.addView(handle, lp(dp(40), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(14) })
+        head.addView(display(title, 22f), lp(wrapC, wrapC))
+        var downY = 0f
+        head.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { downY = e.rawY; true }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = (e.rawY - downY).coerceAtLeast(0f)
+                    panel.translationY = dy
+                    scrim.alpha = (1f - dy / maxOf(1, panel.height)).coerceIn(0f, 1f)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (e.rawY - downY > dp(110)) closeSheet()
+                    else {
+                        panel.animate().translationY(0f).setDuration(420).setInterpolator(SpringInterpolator(16f, 0.6f, 0.8f)).start()
+                        scrim.animate().alpha(1f).setDuration(200).start()
+                    }
+                    true
+                }
+                else -> true
+            }
+        }
+        panel.addView(head, lp(matchP, wrapC))
         val maxH = (resources.displayMetrics.heightPixels * 0.78f).toInt()
         val sc = CapScroll(this, maxH).apply {
             isVerticalScrollBarEnabled = false
@@ -752,7 +784,7 @@ class MainActivity : Activity() {
         spark?.bringToFront()
         panel.translationY = dp(700).toFloat()
         scrim.animate().alpha(1f).setDuration(200).start()
-        panel.animate().translationY(0f).setDuration(280).setInterpolator(DecelerateInterpolator(1.6f)).start()
+        panel.animate().translationY(0f).setDuration(520).setInterpolator(SpringInterpolator(14f, 0.8f, 0.9f)).start()
         sheetLayer = layer
         sheetPanel = panel
         sheetScrim = scrim
@@ -808,12 +840,19 @@ class MainActivity : Activity() {
             setupChecks[2].setChecked(batt, true)
         }
         val running = Store.focusRunning(this)
-        statusChip?.text = when {
-            !on -> "Setup needed"
-            running && Store.onBreak(this) -> "On break"
-            running -> "Focusing"
-            Store.scheduleActive(this) != null -> "Schedule on"
-            else -> "Ready"
+        val chip = statusChip
+        if (chip != null) {
+            val now = System.currentTimeMillis()
+            val start = Store.focusStart(this)
+            val end = Store.focusEnd(this)
+            val frac = if (end > start) ((now - start).toFloat() / (end - start)).coerceIn(0f, 1f) else 0f
+            when {
+                !on -> chip.set("setup", "needed", null, 0f, CallChip.ERROR)
+                running && Store.onBreak(this) -> chip.set("break", "paused", clock(maxOf(0L, Store.breakUntil(this) - now)), 0f, CallChip.IDLE)
+                running -> chip.set("focus", Store.focusTag(this).lowercase().ifEmpty { "session" }, clock(Store.focusLeftMs(this)), frac, CallChip.RUNNING)
+                Store.scheduleActive(this) != null -> chip.set("routine", "on", null, 1f, CallChip.DONE)
+                else -> chip.set("shortstop", "ready", null, 0f, CallChip.IDLE)
+            }
         }
     }
 
@@ -822,16 +861,8 @@ class MainActivity : Activity() {
         val col = column()
 
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(
-            ShinyTextView(this, pal.ink, mixColor(pal.ink, pal.canvas, 0.72f)).apply {
-                text = "Focus"; textSize = 30f; typeface = fonts.bold; setTextColor(pal.ink)
-                letterSpacing = -0.02f; includeFontPadding = false
-            }, lp(0, wrapC, 1f)
-        )
-        val chip = tv("", 12f, fonts.semi, pal.ink, Gravity.CENTER).apply {
-            background = round(pal.canvas, 40, pal.border, dp(1))
-            setPadding(dp(14), dp(7), dp(14), dp(7))
-        }
+        top.addView(display("Focus", 30f), lp(0, wrapC, 1f))
+        val chip = CallChip(this, pal, fonts)
         statusChip = chip
         top.addView(chip)
         col.addView(top)
@@ -855,7 +886,6 @@ class MainActivity : Activity() {
         val run = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            background = round(pal.surface, 24, pal.border, dp(1))
             setPadding(dp(20), dp(28), dp(20), dp(24))
         }
         val stat = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -889,9 +919,15 @@ class MainActivity : Activity() {
         btns.addView(breakBtn, lp(0, wrapC, 1f).apply { marginEnd = dp(8) })
         btns.addView(endBtn, lp(0, wrapC, 1f))
         run.addView(btns, lp(matchP, wrapC))
-        run.visibility = View.GONE
-        runningCard = run
-        col.addView(run, lp(matchP, wrapC).apply { topMargin = dp(18) })
+        val runWrap = FrameLayout(this).apply {
+            background = round(pal.surface, 24, pal.border, dp(1))
+            clipToOutline = true
+            visibility = View.GONE
+        }
+        runWrap.addView(SilkView(this, pal.surface, pal.dark), FrameLayout.LayoutParams(matchP, matchP))
+        runWrap.addView(run, FrameLayout.LayoutParams(matchP, wrapC))
+        runningCard = runWrap
+        col.addView(runWrap, lp(matchP, wrapC).apply { topMargin = dp(18) })
 
         // Day / Week / Month
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -997,7 +1033,13 @@ class MainActivity : Activity() {
         val last = Store.sessions(this).lastOrNull() ?: return
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
         box.addView(display(fmtMin(last.minutes), 44f))
-        box.addView(tv("Focus session complete. Nice work.", 15f, fonts.regular, pal.muted).apply { setPadding(0, dp(6), 0, dp(18)) })
+        box.addView(tv("${last.tag.ifEmpty { "Focus" }} session finished.", 15f, fonts.regular, pal.muted).apply { setPadding(0, dp(6), 0, dp(16)) })
+        val heartRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        heartRow.addView(tv("Sessions you kept", 14f, fonts.regular, pal.muted), lp(0, wrapC, 1f))
+        heartRow.addView(PulseHeart(this, pal, fonts, Store.lovedCount(this), Store.isLoved(this, last.start), true) { on, _ ->
+            Store.setLoved(this, last.start, on)
+        }, lp(wrapC, wrapC))
+        box.addView(heartRow, lp(matchP, wrapC).apply { bottomMargin = dp(18) })
         box.addView(pill("Done", true) { closeSheet() }, lp(matchP, wrapC))
         showSheet("Session complete", box)
     }
@@ -1099,7 +1141,10 @@ class MainActivity : Activity() {
                     })
                     left.addView(tv(tf.format(java.util.Date(s.start)) + if (s.done) "" else " · ended early", 12f, fonts.regular, pal.muted))
                     r.addView(left, lp(0, wrapC, 1f))
-                    r.addView(tv(fmtMin(s.minutes), 15f, fonts.semi, pal.ink))
+                    r.addView(tv(fmtMin(s.minutes), 15f, fonts.semi, pal.ink).apply { setPadding(0, 0, dp(12), 0) })
+                    r.addView(PulseHeart(this, pal, fonts, 0, Store.isLoved(this, s.start), false) { on, _ ->
+                        Store.setLoved(this, s.start, on)
+                    }, lp(dp(40), dp(40)))
                     sess.addView(r)
                 }
                 col.addView(sess, lp(matchP, wrapC).apply { topMargin = dp(12) })
@@ -1493,6 +1538,7 @@ class MainActivity : Activity() {
             .sortedBy { if (it.pkg in on) 0 else 1 }
         shown.clear()
         shown.addAll(list)
+        visibleKeys.clear()
         appAdapter?.notifyDataSetChanged()
     }
 
@@ -1508,7 +1554,7 @@ class MainActivity : Activity() {
             val tile = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = round(pal.surface, 24, pal.border, dp(1))
+                background = round(pal.surface, 16, pal.border, dp(1))
                 setPadding(dp(16), dp(12), dp(16), dp(12))
             }
             icon.outlineProvider = object : ViewOutlineProvider() {
@@ -1525,6 +1571,14 @@ class MainActivity : Activity() {
                 else Store.setFocusApp(this@MainActivity, pkg, on)
             }
             tile.setOnClickListener { toggle.performClick() }
+            tile.setOnTouchListener { v, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> v.animate().scaleX(0.975f).scaleY(0.975f).setDuration(90).setInterpolator(DecelerateInterpolator()).start()
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                        v.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(SpringInterpolator(18f, 0.5f, 0.8f)).start()
+                }
+                false
+            }
             addView(tile, FrameLayout.LayoutParams(matchP, wrapC))
         }
 
@@ -1616,7 +1670,7 @@ class MainActivity : Activity() {
             overScrollMode = View.OVER_SCROLL_NEVER
             cacheColorHint = pal.canvas
             isVerticalFadingEdgeEnabled = true
-            setFadingEdgeLength(dp(40))
+            setFadingEdgeLength(dp(56))
         }
         val adapter = object : BaseAdapter() {
             override fun getCount() = shown.size
@@ -1624,19 +1678,36 @@ class MainActivity : Activity() {
             override fun getItemId(position: Int) = position.toLong()
             override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
                 val item = (convertView as? AppItem) ?: AppItem(this@MainActivity)
+                val key = shown[position].pkg
                 item.bind(shown[position])
-                popIn(item, if (position < 8) position * 50L else 0L)
+                if (visibleKeys.add(key)) {
+                    val now = android.os.SystemClock.uptimeMillis()
+                    popIdx = if (now - lastPop < 90) popIdx + 1 else 0
+                    lastPop = now
+                    popIn(item, minOf(popIdx, 8) * 55L)
+                } else {
+                    (item.getTag(R_POP) as? ValueAnimator)?.cancel()
+                    item.alpha = 1f; item.scaleX = 1f; item.scaleY = 1f; item.translationY = 0f
+                }
                 return item
             }
         }
         appAdapter = adapter
+        list.setOnScrollListener(object : AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(view: AbsListView?, state: Int) {}
+            override fun onScroll(view: AbsListView?, first: Int, count: Int, total: Int) {
+                val keep = HashSet<String>()
+                for (i in first until minOf(first + count, shown.size)) keep.add(shown[i].pkg)
+                visibleKeys.retainAll(keep)
+            }
+        })
         list.adapter = adapter
         appsPane.addView(list, lp(matchP, 0, 1f))
 
         // websites
         val webCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(24)) }
         val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val urlInput = input("https://reddit.com")
+        lateinit var urlInput: EditText
         fun addSite() {
             val d = Store.cleanDomain(urlInput.text.toString())
             if (d == null) {
@@ -1647,9 +1718,9 @@ class MainActivity : Activity() {
             urlInput.setText("")
             refreshSites()
         }
-        urlInput.setOnEditorActionListener { _, _, _ -> addSite(); true }
-        addRow.addView(urlInput, lp(0, wrapC, 1f))
-        addRow.addView(pill("Block", true) { addSite() }, lp(wrapC, wrapC).apply { marginStart = dp(8) })
+        val curved = CurvedBar(this, pal, fonts, "reddit.com", "Block") { addSite() }
+        urlInput = curved.edit
+        addRow.addView(curved, lp(matchP, wrapC))
         webCol.addView(addRow)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         sitesBox = box
@@ -1792,12 +1863,18 @@ class MainActivity : Activity() {
         charts = ArrayList()
 
         val week = (0..6).map { Store.blockedOn(this, it) }.sum()
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf(Store.today(this) to "Today", week to "This week", Store.total(this) to "All time").forEachIndexed { i, p ->
-            val tile = card().apply { setPadding(dp(14), dp(16), dp(14), dp(16)) }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
+        val big = card().apply { setPadding(dp(18), dp(18), dp(18), dp(18)); gravity = Gravity.BOTTOM }
+        big.addView(OdometerView(this, pal.ink, fonts.bold, 56f).apply { setValue(Store.today(this@MainActivity)) })
+        big.addView(tv("Blocked today", 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(4), 0, 0) })
+        row.addView(big, LinearLayout.LayoutParams(0, matchP, 1.15f))
+        val side = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        listOf(week to "This week", Store.total(this) to "All time").forEachIndexed { i, p ->
+            val tile = card().apply { setPadding(dp(16), dp(14), dp(16), dp(14)) }
             tile.addView(statTile(p.first, p.second))
-            row.addView(tile, lp(0, wrapC, 1f).apply { if (i > 0) marginStart = dp(8) })
+            side.addView(tile, lp(matchP, wrapC).apply { if (i > 0) topMargin = dp(8) })
         }
+        row.addView(side, lp(0, wrapC, 1f).apply { marginStart = dp(8) })
         col.addView(row, lp(matchP, wrapC).apply { topMargin = dp(12) })
 
         col.addView(sectionTitle("Distractions blocked"))
@@ -2058,6 +2135,10 @@ class MainActivity : Activity() {
         holdHolder.addView(toggleRow("Longer each time", "+2 seconds for every pass taken today", Store.progressive(this)) {
             Store.setProgressive(this, it)
         })
+        holdHolder.addView(divider(), lp(matchP, dp(1)))
+        holdHolder.addView(HoldPill(this, pal, fonts, { Store.holdSeconds(this) }) {
+            toast("That is the hold", "This is what the wall asks for.")
+        }, lp(matchP, wrapC).apply { setMargins(dp(16), dp(14), dp(16), dp(14)) })
         hold.addView(holdHolder, lp(matchP, wrapC))
         col.addView(hold, lp(matchP, wrapC))
 
