@@ -7,6 +7,8 @@ import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.SweepGradient
+import android.graphics.Matrix
 import android.view.View
 
 /**
@@ -61,9 +63,12 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         color = pal.muted; typeface = fonts.medium; textAlign = Paint.Align.CENTER
     }
     private val rect = RectF()
+    private val face = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val faceEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val sweepM = Matrix()
 
     override fun onMeasure(w: Int, h: Int) {
-        val limit = (250f * d).toInt()
+        val limit = (280f * d).toInt()
         val s = minOf(MeasureSpec.getSize(w).takeIf { it > 0 } ?: limit, limit)
         setMeasuredDimension(s, s)
     }
@@ -73,18 +78,40 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         val cx = size / 2f
         val cy = size / 2f
         val sw = 5f * d
-        val r = size / 2f - 10f * d
+        val r = size / 2f - 30f * d
         val now = System.currentTimeMillis()
         val frac = if (endMs > startMs) ((now - startMs).toFloat() / (endMs - startMs)).coerceIn(0f, 1f) else 0f
+
+        // the dial face: a soft raised disc inside the ring
+        val faceR = r - 14f * d
+        for (k in 5 downTo 1) {
+            face.color = Color.argb(if (pal.dark) 10 else 7, 0, 0, 0)
+            c.drawCircle(cx, cy + 3f * d, faceR + k * 2.2f * d, face)
+        }
+        face.color = pal.canvas
+        c.drawCircle(cx, cy, faceR, face)
+        faceEdge.color = pal.border
+        faceEdge.strokeWidth = d
+        c.drawCircle(cx, cy, faceR, faceEdge)
 
         track.strokeWidth = sw
         track.alpha = 120
         rect.set(cx - r, cy - r, cx + r, cy + r)
         c.drawOval(rect, track)
 
+        // arc with a comet tail: faint where it starts, solid at the head
         arc.strokeWidth = sw
-        arc.alpha = if (calm) 110 else 255
-        if (frac > 0.0005f) c.drawArc(rect, -90f, 360f * frac, false, arc)
+        if (frac > 0.0005f) {
+            val ink = pal.ink
+            val tail = Color.argb(if (calm) 30 else 46, Color.red(ink), Color.green(ink), Color.blue(ink))
+            val headC = Color.argb(if (calm) 110 else 255, Color.red(ink), Color.green(ink), Color.blue(ink))
+            val sg = SweepGradient(cx, cy, intArrayOf(tail, headC), floatArrayOf(0f, maxOf(frac, 0.01f)))
+            sweepM.setRotate(-90f, cx, cy)
+            sg.setLocalMatrix(sweepM)
+            arc.shader = sg
+            c.drawArc(rect, -90f, 360f * frac, false, arc)
+            arc.shader = null
+        }
 
         // glowing head at the end of the arc
         val a = Math.toRadians((-90f + 360f * frac).toDouble())
@@ -92,7 +119,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         val hy = cy + r * Math.sin(a).toFloat()
         if (!calm) {
             val pulse = 0.5f + 0.5f * Math.sin(now / 520.0).toFloat()
-            val hr = (15f + 5f * pulse) * d
+            val hr = (13f + 4f * pulse) * d
             halo.shader = RadialGradient(
                 hx, hy, hr,
                 Color.argb((60 + 30 * pulse).toInt(), Color.red(pal.ink), Color.green(pal.ink), Color.blue(pal.ink)),
@@ -107,7 +134,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         // seconds: 60 dots that fill one by one, the current one swelling smoothly
         val sec = ((now / 1000L) % 60L).toInt()
         val within = (now % 1000L) / 1000f
-        val dr = r - 22f * d
+        val dr = r - 30f * d
         for (i in 0 until 60) {
             val ang = Math.toRadians((-90.0 + i * 6.0))
             val px = cx + dr * Math.cos(ang).toFloat()
@@ -127,7 +154,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         // digits, sized to sit inside the dots
         var ts = size * 0.215f
         bigP.textSize = ts
-        val inner = dr * 2f - 40f * d
+        val inner = dr * 2f - 28f * d
         // the roll painter draws digit by digit, so measure the same way
         while (bigP.measureText(big) > inner && ts > 20f * d) {
             ts -= 1f * d

@@ -592,17 +592,17 @@ class MainActivity : Activity() {
         old.visibility = View.GONE
         nw.animate().cancel()
         nw.visibility = View.VISIBLE
+        when (i) {
+            0 -> { fillFocusStats(); refreshStatus() }
+            1 -> fillSchedules()
+            3 -> { fillStats(); charts.forEach { it.play() }; if (usageCol?.visibility == View.VISIBLE) fillUsage() }
+        }
         val dir = if (i > tabBefore) 1f else -1f
         nw.alpha = 0f
         nw.translationX = dir * dp(36)
         nw.animate().alpha(1f).translationX(0f).setDuration(520).setInterpolator(SpringInterpolator(15f, 0.75f, 0.9f)).withLayer().start()
         stagger(nw)
         styleNav()
-        when (i) {
-            0 -> { fillFocusStats(); refreshStatus() }
-            1 -> fillSchedules()
-            3 -> { fillStats(); charts.forEach { it.play() }; if (usageCol?.visibility == View.VISIBLE) fillUsage() }
-        }
     }
 
     private val stagAnims = ArrayList<ValueAnimator>()
@@ -916,8 +916,10 @@ class MainActivity : Activity() {
         }
         runBreakBtn = breakBtn
         runEndBtn = endBtn
-        btns.addView(breakBtn, lp(0, wrapC, 1f).apply { marginEnd = dp(8) })
-        btns.addView(endBtn, lp(0, wrapC, 1f))
+        breakBtn.setSingleLine(true)
+        breakBtn.setPadding(dp(12), 0, dp(12), 0)
+        btns.addView(breakBtn, lp(0, dp(50), 1f).apply { marginEnd = dp(8) })
+        btns.addView(endBtn, lp(0, dp(50), 1f))
         run.addView(btns, lp(matchP, wrapC))
         val runWrap = FrameLayout(this).apply {
             background = round(pal.surface, 24, pal.border, dp(1))
@@ -1007,7 +1009,7 @@ class MainActivity : Activity() {
             runRing?.small = if (onBreak) "On break" else Store.focusTag(this).ifEmpty { "Focus" }
             runRing?.setSpan(start, end, onBreak)
             runInfo?.text = if (onBreak) "Break ends in ${clock(Store.breakUntil(this) - now)}. Blocks come back after."
-            else "${Store.breaksLeft(this)} break(s) left. ${if (Store.focusStrict(this)) "Strict mode is on." else ""}"
+            else Store.breaksLeft(this).let { n -> "${if (n == 0) "No" else n.toString()} break${if (n == 1) "" else "s"} left." + (if (Store.focusStrict(this)) " Strict mode is on." else "") }
             runBreakBtn?.let { b ->
                 b.visibility = if (!onBreak && Store.breaksLeft(this) == 0) View.GONE else View.VISIBLE
                 b.text = if (onBreak) "End break" else "Take a break"
@@ -1569,6 +1571,66 @@ class MainActivity : Activity() {
         shown.addAll(list)
         visibleKeys.clear()
         appAdapter?.notifyDataSetChanged()
+        updateBulk()
+    }
+
+    private var bulkBtn: TextView? = null
+
+    /** Apps that must stay usable whatever is blocked: dialer, settings, the launcher, system UI, emergency. */
+    private fun essentialPkgs(): Set<String> {
+        val out = HashSet<String>()
+        out.addAll(listOf(
+            "com.android.phone", "com.android.dialer", "com.google.android.dialer", "com.samsung.android.dialer",
+            "com.android.settings", "com.android.systemui", "com.android.contacts", "com.android.emergency",
+            "com.miui.home", "com.mi.android.globallauncher", "com.google.android.apps.nexuslauncher", "com.sec.android.app.launcher"
+        ))
+        try {
+            val tm = getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+            tm?.defaultDialerPackage?.let { out.add(it) }
+        } catch (e: Exception) { }
+        try {
+            val pm = packageManager
+            for (i in listOf(
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
+                Intent(Intent.ACTION_DIAL),
+                Intent(Settings.ACTION_SETTINGS)
+            )) pm.resolveActivity(i, 0)?.activityInfo?.packageName?.let { if (it != "android") out.add(it) }
+        } catch (e: Exception) { }
+        return out
+    }
+
+    private fun updateBulk() {
+        val b = bulkBtn ?: return
+        val keep = essentialPkgs()
+        val targets = shown.filter { it.pkg !in keep }
+        b.text = if (targets.isNotEmpty() && targets.all { appIsOn(it.pkg) }) "Unblock all" else "Block all"
+    }
+
+    private fun setAppOn(pkg: String, on: Boolean) {
+        if (appMode == 0) Store.setAppBlocked(this, pkg, on) else Store.setFocusApp(this, pkg, on)
+    }
+
+    private fun blockAllShown() {
+        val keep = essentialPkgs()
+        val targets = shown.filter { it.pkg !in keep }
+        if (targets.isEmpty()) return
+        val unblock = targets.all { appIsOn(it.pkg) }
+        if (unblock && !free()) return
+        val changed = targets.filter { appIsOn(it.pkg) == unblock }.map { it.pkg }
+        for (p in changed) setAppOn(p, !unblock)
+        applyFilter()
+        val n = changed.size
+        toast(
+            if (unblock) "Unblocked $n app${if (n == 1) "" else "s"}"
+            else "Blocked $n app${if (n == 1) "" else "s"}",
+            if (unblock) "" else "Phone, Settings and your launcher stay open.",
+            "Undo"
+        ) {
+            if (unblock || free()) {
+                for (p in changed) setAppOn(p, unblock)
+                applyFilter()
+            }
+        }
     }
 
     private inner class AppItem(ctx: Context) : FrameLayout(ctx) {
@@ -1598,6 +1660,7 @@ class MainActivity : Activity() {
             toggle.listener = { on ->
                 if (appMode == 0) Store.setAppBlocked(this@MainActivity, pkg, on)
                 else Store.setFocusApp(this@MainActivity, pkg, on)
+                updateBulk()
             }
             tile.setOnClickListener { toggle.performClick() }
             tile.setOnTouchListener { v, e ->
@@ -1686,7 +1749,15 @@ class MainActivity : Activity() {
         appsPane.addView(hint)
         val search = input("Search apps")
         watch(search) { appQuery = it; applyFilter() }
-        appsPane.addView(search, lp(matchP, wrapC).apply { topMargin = dp(10); bottomMargin = dp(12) })
+        val searchRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        searchRow.addView(search, lp(0, wrapC, 1f))
+        val bulk = pill("Block all", false) { blockAllShown() }.apply {
+            setSingleLine(true)
+            setPadding(dp(16), 0, dp(16), 0)
+        }
+        bulkBtn = bulk
+        searchRow.addView(bulk, lp(wrapC, dp(50)).apply { marginStart = dp(8) })
+        appsPane.addView(searchRow, lp(matchP, wrapC).apply { topMargin = dp(10); bottomMargin = dp(12) })
         val loading = tv("Loading your apps…", 14f, fonts.regular, pal.muted, Gravity.CENTER).apply { setPadding(0, dp(24), 0, 0) }
         loadingText = loading
         if (allApps.isNotEmpty()) loading.visibility = View.GONE

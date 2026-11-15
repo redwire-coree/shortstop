@@ -12,6 +12,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
+import android.os.Build
 import android.os.SystemClock
 import android.text.InputType
 import android.view.Gravity
@@ -121,6 +122,96 @@ class GooeyNav(
     private val dr = FloatArray(maxDrops)
     private val dtx = FloatArray(maxDrops)
     private val dty = FloatArray(maxDrops)
+
+    // GPU path (Android 13+): the same smooth-min field as the original WebGL shader, evaluated per pixel on the GPU.
+    private var gpuOk = Build.VERSION.SDK_INT >= 33
+    private var gpuShader: Any? = null
+    private val gBlob = FloatArray(32)
+    private val gDrop = FloatArray(128)
+    private val gDir = FloatArray(128)
+    private val gpuPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val gpuMask = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
+    private val gpuRect = RectF()
+
+    private val agsl = """
+uniform float4 uBlob[8];
+uniform float uBlobN;
+uniform float4 uDrop[32];
+uniform float4 uDir[32];
+uniform float uDropN;
+uniform float uK;
+uniform float3 uInk;
+
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return b + (a - b) * h - k * h * (1.0 - h);
+}
+
+float sdRound(float2 p, float2 c, float2 hs) {
+    float r = min(hs.x, hs.y);
+    float2 q = abs(p - c) - hs + r;
+    return length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
+
+half4 main(float2 fc) {
+    float d = 100000.0;
+    for (int i = 0; i < 8; i++) {
+        if (float(i) >= uBlobN) break;
+        d = smin(d, sdRound(fc, uBlob[i].xy, uBlob[i].zw), uK);
+    }
+    for (int i = 0; i < 32; i++) {
+        if (float(i) >= uDropN) break;
+        float2 a = fc - uDrop[i].xy;
+        float2 b = -uDir[i].xy;
+        float span = dot(b, b);
+        float h = span > 0.0001 ? clamp(dot(a, b) / span, 0.0, 1.0) : 0.0;
+        float v = length(a - b * h) - uDrop[i].z;
+        d = smin(d, v, uK);
+    }
+    float cover = clamp(0.5 - d, 0.0, 1.0);
+    return half4(half3(uInk) * half(cover), half(cover));
+}
+"""
+
+    @android.annotation.TargetApi(33)
+    private fun blobGpu(c: Canvas, nb: Int, nd: Int, k: Float, x0: Float, y0: Float, x1: Float, y1: Float): Boolean {
+        try {
+            var s = gpuShader as? android.graphics.RuntimeShader
+            if (s == null) {
+                s = android.graphics.RuntimeShader(agsl)
+                gpuShader = s
+            }
+            java.util.Arrays.fill(gBlob, 0f)
+            java.util.Arrays.fill(gDrop, 0f)
+            java.util.Arrays.fill(gDir, 0f)
+            for (i in 0 until nb) {
+                gBlob[i * 4] = bcx[i]; gBlob[i * 4 + 1] = bcy[i]; gBlob[i * 4 + 2] = bhw[i]; gBlob[i * 4 + 3] = bhh[i]
+            }
+            for (i in 0 until nd) {
+                gDrop[i * 4] = dx[i]; gDrop[i * 4 + 1] = dy[i]; gDrop[i * 4 + 2] = dr[i]
+                gDir[i * 4] = dtx[i]; gDir[i * 4 + 1] = dty[i]
+            }
+            s.setFloatUniform("uBlob", gBlob)
+            s.setFloatUniform("uBlobN", nb.toFloat())
+            s.setFloatUniform("uDrop", gDrop)
+            s.setFloatUniform("uDir", gDir)
+            s.setFloatUniform("uDropN", nd.toFloat())
+            s.setFloatUniform("uK", k)
+            s.setFloatUniform("uInk", Color.red(pal.ink) / 255f, Color.green(pal.ink) / 255f, Color.blue(pal.ink) / 255f)
+            gpuPaint.shader = s
+            gpuRect.set(x0, y0, x1, y1)
+            c.drawRect(gpuRect, gpuPaint)
+            val layer = c.saveLayer(gpuRect, null)
+            drawLabels(c, pal.canvas, true)
+            gpuMask.shader = s
+            c.drawRect(gpuRect, gpuMask)
+            c.restoreToCount(layer)
+            return true
+        } catch (e: Throwable) {
+            gpuOk = false
+            return false
+        }
+    }
 
     override fun onMeasure(w: Int, h: Int) {
         setMeasuredDimension(MeasureSpec.getSize(w), (52f * d).toInt())
@@ -435,6 +526,9 @@ class GooeyNav(
         minX = maxOf(minX - m, -60f * d); maxX = minOf(maxX + m, width + 60f * d)
         minY = maxOf(minY - m, -150f * d); maxY = minOf(maxY + m, height + 70f * d)
         if (maxX <= minX || maxY <= minY) return
+        if (Build.VERSION.SDK_INT >= 33 && gpuOk && nd <= 32 && nb <= 8) {
+            if (blobGpu(c, nb, nd, k, minX, minY, maxX, maxY)) return
+        }
         // keep the per-frame work bounded: a big area samples coarser, the bilinear upscale keeps it soft
         val step = maxOf(d * 0.75f, Math.sqrt(((maxX - minX) * (maxY - minY) / 9000f).toDouble()).toFloat())
         val cols = Math.ceil(((maxX - minX) / step).toDouble()).toInt().coerceAtLeast(1)
@@ -778,22 +872,38 @@ class CallChip(ctx: Context, private val pal: Palette, private val fonts: Fonts)
 
 // ------------------------------------------------------------------ Curved input
 
-private class GlobeIcon(ctx: Context, color: Int) : View(ctx) {
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = color; style = Paint.Style.STROKE; strokeWidth = ctx.dp3(1.5f)
+/** The blue envelope tile from react-bits Curved Input. */
+private class MailIcon(ctx: Context) : View(ctx) {
+    private val d = ctx.dp3(1f)
+    private val tile = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#4763EB") }
+    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = ctx.dp3(1.4f)
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
     }
-    private val oval = RectF()
+    private val r = RectF()
+    private val p = Path()
     override fun onDraw(c: Canvas) {
         val w = width.toFloat()
-        val r = w / 2f - p.strokeWidth
-        c.drawCircle(w / 2f, w / 2f, r, p)
-        c.drawLine(w / 2f - r, w / 2f, w / 2f + r, w / 2f, p)
-        oval.set(w / 2f - r * 0.45f, w / 2f - r, w / 2f + r * 0.45f, w / 2f + r)
-        c.drawOval(oval, p)
+        r.set(0f, 0f, w, w)
+        c.drawRoundRect(r, 6f * d, 6f * d, tile)
+        val l = w * 0.24f
+        val t = w * 0.32f
+        val rr = w * 0.76f
+        val b = w * 0.68f
+        r.set(l, t, rr, b)
+        c.drawRoundRect(r, 2f * d, 2f * d, line)
+        p.reset()
+        p.moveTo(l + 0.5f * d, t + 1f * d)
+        p.lineTo(w / 2f, w * 0.54f)
+        p.lineTo(rr - 0.5f * d, t + 1f * d)
+        c.drawPath(p, line)
     }
 }
 
-/** Input bar on a gentle arc. Drawn as a crisp vector outline; the field and button stay straight so typing is exact. */
+/**
+ * react-bits Curved Input: the whole bar, its text, caret, icon and button follow one arc. Children are drawn at 2x into an
+ * offscreen bitmap and bent with a fine mesh, so the glyphs stay sharp; the outline and the soft shadow are vectors.
+ */
 class CurvedBar(
     ctx: Context,
     private val pal: Palette,
@@ -803,27 +913,40 @@ class CurvedBar(
     private val onSubmit: (String) -> Unit
 ) : FrameLayout(ctx) {
     val edit: EditText
-    private val bend = ctx.dp3(10f)
-    private val barH = ctx.dp3(64f).toInt()
-    private val inset = ctx.dp3(1f)
-    private val fillP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.canvas }
+    private val d = ctx.dp3(1f)
+    private val bend = 20f * d
+    private val barH = (64f * d).toInt()
+    private val room = (26f * d).toInt()
+    private val ss = 2f
+    private val navy = Color.parseColor(if (pal.dark) "#E6E8FF" else "#1D2050")
+    private val edgeC = Color.parseColor(if (pal.dark) "#5560C8" else "#262A56")
+    private val fillC = Color.parseColor(if (pal.dark) "#14152B" else "#FFFFFF")
+    private val shadowC = Color.parseColor(if (pal.dark) "#4763EB" else "#1D2050")
+    private var bmp: Bitmap? = null
+    private var bc: Canvas? = null
+    private val fillP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fillC }
     private val edgeP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = pal.ink; style = Paint.Style.STROKE; strokeWidth = ctx.dp3(1.5f); strokeJoin = Paint.Join.ROUND
+        color = edgeC; style = Paint.Style.STROKE; strokeWidth = 1.5f * d; strokeJoin = Paint.Join.ROUND
     }
+    private val shadowP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = shadowC; style = Paint.Style.FILL_AND_STROKE; strokeJoin = Paint.Join.ROUND }
+    private val meshP = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val n = 56
+    private val verts = FloatArray((n + 1) * 4)
     private val shape = Path()
 
     init {
         setWillNotDraw(false)
+        clipChildren = false
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), 0, dp(10), 0)
+            setPadding(dp(16), 0, dp(10), 0)
         }
-        row.addView(GlobeIcon(ctx, pal.muted), LinearLayout.LayoutParams(dp(20), dp(20)))
+        row.addView(MailIcon(ctx), LinearLayout.LayoutParams(dp(24), dp(24)))
         edit = EditText(ctx).apply {
             this.hint = hint
-            setHintTextColor(pal.muted)
-            setTextColor(pal.ink)
+            setHintTextColor(Color.parseColor(if (pal.dark) "#7E85C9" else "#8C91B8"))
+            setTextColor(navy)
             typeface = fonts.regular
             textSize = 16f
             background = null
@@ -831,6 +954,7 @@ class CurvedBar(
             isSingleLine = true
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             imeOptions = EditorInfo.IME_ACTION_DONE
+            highlightColor = Color.parseColor("#554763EB")
             setOnEditorActionListener { _, _, _ -> onSubmit(text.toString()); true }
         }
         row.addView(edit, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -841,14 +965,14 @@ class CurvedBar(
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             includeFontPadding = false
-            // the one accent in the app: a violet-to-indigo gradient on the action
+            // react-bits button #4763eb with a touch of depth: lighter top, darker lip
             background = android.graphics.drawable.GradientDrawable(
-                android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(Color.parseColor("#8B5CF6"), Color.parseColor("#5B5BF0"))
-            ).apply { cornerRadius = dp(14).toFloat() }
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.parseColor("#5A78F3"), Color.parseColor("#4763EB"))
+            ).apply { cornerRadius = dp(13).toFloat(); setStroke(dp(1), Color.parseColor("#3A52CC")) }
             setPadding(dp(20), 0, dp(20), 0)
             isClickable = true
-            alpha = 0.55f
+            alpha = 0.6f
             setOnClickListener { onSubmit(edit.text.toString()) }
             setOnTouchListener { v, e ->
                 when (e.actionMasked) {
@@ -863,46 +987,102 @@ class CurvedBar(
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) {
-                btn.animate().alpha(if (s.isNullOrBlank()) 0.55f else 1f).setDuration(160).start()
+                btn.animate().alpha(if (s.isNullOrBlank()) 0.6f else 1f).setDuration(160).start()
             }
         })
-        row.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
-        addView(row, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barH, Gravity.TOP).apply { topMargin = (bend / 2f).toInt() + 1 })
+        row.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)))
+        addView(row, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barH, Gravity.TOP))
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     override fun onMeasure(w: Int, h: Int) {
-        super.onMeasure(w, MeasureSpec.makeMeasureSpec(barH + bend.toInt() + dp(2), MeasureSpec.EXACTLY))
+        super.onMeasure(w, MeasureSpec.makeMeasureSpec(barH + bend.toInt() + room, MeasureSpec.EXACTLY))
     }
 
-    private fun edgeY(x: Float, w: Float): Float {
-        val u = (x / w) * 2f - 1f
-        return inset + bend * u * u
+    private fun off(x: Float): Float {
+        val u = (x / maxOf(1, width)) * 2f - 1f
+        return bend * u * u
     }
 
-    override fun onDraw(c: Canvas) {
-        val w = width.toFloat() - inset * 2f
-        if (w <= 0f) return
-        val r = context.dp3(18f)
-        val left = inset
-        val hgt = barH - inset * 2f
+    private fun buildShape(w: Float) {
+        val r = 18f * d
+        val i = edgeP.strokeWidth / 2f + 0.5f * d
+        val left = i
+        val right = w - i
+        val h = barH - 2f * i
+        fun top(x: Float) = off(x) + i
         shape.reset()
-        fun top(x: Float) = edgeY(x - left, w) // x in view coordinates
         shape.moveTo(left, top(left) + r)
         shape.quadTo(left, top(left), left + r, top(left + r))
         var x = left + r
-        while (x < left + w - r) { shape.lineTo(x, top(x)); x += context.dp3(4f) }
-        shape.lineTo(left + w - r, top(left + w - r))
-        shape.quadTo(left + w, top(left + w), left + w, top(left + w) + r)
-        shape.lineTo(left + w, top(left + w) + hgt - r)
-        shape.quadTo(left + w, top(left + w) + hgt, left + w - r, top(left + w - r) + hgt)
-        x = left + w - r
-        while (x > left + r) { shape.lineTo(x, top(x) + hgt); x -= context.dp3(4f) }
-        shape.lineTo(left + r, top(left + r) + hgt)
-        shape.quadTo(left, top(left) + hgt, left, top(left) + hgt - r)
+        while (x < right - r) { shape.lineTo(x, top(x)); x += 3f * d }
+        shape.lineTo(right - r, top(right - r))
+        shape.quadTo(right, top(right), right, top(right) + r)
+        shape.lineTo(right, top(right) + h - r)
+        shape.quadTo(right, top(right) + h, right - r, top(right - r) + h)
+        x = right - r
+        while (x > left + r) { shape.lineTo(x, top(x) + h); x -= 3f * d }
+        shape.lineTo(left + r, top(left + r) + h)
+        shape.quadTo(left, top(left) + h, left, top(left) + h - r)
         shape.close()
+    }
+
+    override fun dispatchDraw(c: Canvas) {
+        val w = width
+        if (w <= 0) return
+        buildShape(w.toFloat())
+
+        // soft shadow: stacked, widening strokes of the same shape, offset downwards ("medium")
+        c.save()
+        c.translate(0f, 9f * d)
+        for (k in 1..9) {
+            shadowP.strokeWidth = k * 2.2f * d
+            shadowP.alpha = (if (pal.dark) 7 else 6)
+            c.drawPath(shape, shadowP)
+        }
+        c.restore()
         c.drawPath(shape, fillP)
+
+        // children at 2x, then bent along the arc
+        val bw = (w * ss).toInt()
+        val bh = (barH * ss).toInt()
+        var b = bmp
+        if (b == null || b.width != bw || b.height != bh) {
+            b?.recycle()
+            b = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+            bmp = b
+            bc = Canvas(b)
+        }
+        val cv = bc ?: return
+        b.eraseColor(Color.TRANSPARENT)
+        cv.save()
+        cv.scale(ss, ss)
+        super.dispatchDraw(cv)
+        cv.restore()
+        for (i in 0..n) {
+            val x = w * i / n.toFloat()
+            val o = off(x)
+            verts[i * 2] = x
+            verts[i * 2 + 1] = o
+            verts[(n + 1) * 2 + i * 2] = x
+            verts[(n + 1) * 2 + i * 2 + 1] = barH + o
+        }
+        c.drawBitmapMesh(b, n, 1, verts, 0, null, 0, meshP)
         c.drawPath(shape, edgeP)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val e = MotionEvent.obtain(ev)
+        e.offsetLocation(0f, -off(ev.x))
+        val r = super.dispatchTouchEvent(e)
+        e.recycle()
+        return r
+    }
+
+    override fun onDetachedFromWindow() {
+        bmp?.recycle()
+        bmp = null
+        super.onDetachedFromWindow()
     }
 }
