@@ -73,6 +73,7 @@ class MainActivity : Activity() {
     // Focus tab
     private var statusChip: CallChip? = null
     private var setupCard: View? = null
+    private var setupStepper: SetupStepper? = null
     private var runningCard: View? = null
     private var runRing: TimerDial? = null
     private var runInfo: TextView? = null
@@ -833,7 +834,19 @@ class MainActivity : Activity() {
     private fun refreshStatus() {
         val on = serviceOn()
         val batt = batteryOk()
-        setupCard?.visibility = if (on && batt) View.GONE else View.VISIBLE
+        val ack = Store.prefs(this).getBoolean("setup_ack", false)
+        setupStepper?.sync(booleanArrayOf(ack || on, on, batt))
+        val sc = setupCard
+        if (sc != null) {
+            if (on && batt) {
+                // the stepper plays its "all set" moment and collapses the card itself
+                if (sc.visibility != View.VISIBLE || !sc.isLaidOut) sc.visibility = View.GONE
+            } else if (sc.visibility != View.VISIBLE) {
+                sc.visibility = View.VISIBLE
+                sc.alpha = 1f
+                sc.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            }
+        }
         if (setupChecks.size == 3) {
             setupChecks[0].setChecked(on, true)
             setupChecks[1].setChecked(on, true)
@@ -867,18 +880,38 @@ class MainActivity : Activity() {
         top.addView(chip)
         col.addView(top)
 
-        // First-run setup
+        // First-run setup: a stepper that watches the real state and moves on by itself
         val setup = card()
-        setup.addView(display("Finish setup", 20f).apply { setPadding(0, dp(16), 0, dp(4)) })
-        setup.addRow(stepRow("Turn on Shortstop", "Accessibility settings > Shortstop > On") {
-            open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        })
-        setup.addRow(stepRow("Allow restricted settings", "App info > ⋮ menu > Allow restricted settings") {
-            open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
-        })
-        setup.addRow(stepRow("Keep it running", "Battery: No restrictions (Xiaomi: allow Autostart)") {
-            open(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        })
+        val stepper = SetupStepper(
+            this, pal, fonts,
+            listOf(
+                SetupStepper.Step(
+                    "Allow", "Allow restricted settings",
+                    "Android hides accessibility for apps installed outside the Play Store. Open App info, tap the ⋮ menu at the top right, then choose Allow restricted settings.",
+                    "Open app info",
+                    { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) },
+                    true
+                ),
+                SetupStepper.Step(
+                    "Turn on", "Turn on Shortstop",
+                    "Open Accessibility, find Shortstop and switch it on. This is how Shortstop sees a Short or Reel and closes it.",
+                    "Open Accessibility",
+                    { open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                    false
+                ),
+                SetupStepper.Step(
+                    "Keep alive", "Keep it running",
+                    "Set battery to No restrictions so Android never stops Shortstop in the background. On Xiaomi, also allow Autostart.",
+                    "Open battery settings",
+                    { open(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) },
+                    false
+                )
+            ),
+            { Store.prefs(this).edit().putBoolean("setup_ack", true).apply() },
+            { setupCard?.let { collapseAway(it) } }
+        )
+        setupStepper = stepper
+        setup.addView(stepper, lp(matchP, wrapC))
         setupCard = setup
         col.addView(setup, lp(matchP, wrapC).apply { topMargin = dp(18) })
 

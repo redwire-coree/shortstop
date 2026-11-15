@@ -57,12 +57,17 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
     private val halo = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.surface }
     private val bigP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = pal.ink; typeface = fonts.bold; textAlign = Paint.Align.CENTER; letterSpacing = -0.02f
+        color = Color.parseColor("#1A1410"); typeface = fonts.bold; textAlign = Paint.Align.CENTER; letterSpacing = -0.02f
     }
     private val smallP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = pal.muted; typeface = fonts.medium; textAlign = Paint.Align.CENTER
+        color = Color.argb(170, 26, 20, 16); typeface = fonts.medium; textAlign = Paint.Align.CENTER
     }
     private val rect = RectF()
+    private val grain = GrainientEngine(this)
+    private val faceInk = Color.parseColor("#1A1410")
+    private var faceCx = 0f
+    private var faceCy = 0f
+    private var faceR = 0f
     private val face = Paint(Paint.ANTI_ALIAS_FLAG)
     private val faceEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val sweepM = Matrix()
@@ -83,16 +88,19 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         val frac = if (endMs > startMs) ((now - startMs).toFloat() / (endMs - startMs)).coerceIn(0f, 1f) else 0f
 
         // the dial face: a soft raised disc inside the ring
-        val faceR = r - 14f * d
+        faceR = r - 14f * d
+        faceCx = cx
+        faceCy = cy
         for (k in 5 downTo 1) {
-            face.color = Color.argb(if (pal.dark) 10 else 7, 0, 0, 0)
+            face.color = Color.argb(if (pal.dark) 22 else 10, 0, 0, 0)
             c.drawCircle(cx, cy + 3f * d, faceR + k * 2.2f * d, face)
         }
-        face.color = pal.canvas
-        c.drawCircle(cx, cy, faceR, face)
-        faceEdge.color = pal.border
+        // react-bits Grainient, Ember preset: flowing grainy gradient you can stir with a finger
+        grain.step()
+        grain.drawDisc(c, cx, cy, faceR, d)
+        faceEdge.color = Color.argb(70, 255, 255, 255)
         faceEdge.strokeWidth = d
-        c.drawCircle(cx, cy, faceR, faceEdge)
+        c.drawCircle(cx, cy, faceR - 0.5f * d, faceEdge)
 
         track.strokeWidth = sw
         track.alpha = 120
@@ -146,7 +154,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
                 i == sec -> within
                 else -> 0f
             }
-            dot.color = pal.ink
+            dot.color = faceInk
             dot.alpha = (if (calm) 40 + 40 * lit else 38 + 190 * lit).toInt().coerceIn(0, 255)
             c.drawCircle(px, py, base * (1f + 0.5f * lit), dot)
         }
@@ -167,7 +175,33 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
             c.drawText(small, cx, base + smallP.textSize * 2.1f, smallP)
         }
 
-        if (live && isShown) postInvalidateOnAnimation()
+        // the gradient flows slowly, so 30fps is plenty until a finger stirs it
+        if (live && isShown) {
+            if (grain.touching()) postInvalidateOnAnimation() else postInvalidateDelayed(30)
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        grain.restartIntro()
+    }
+
+    private fun gx(x: Float) = (x - (faceCx - faceR)) / (2f * faceR)
+    private fun gy(y: Float) = 1f - (y - (faceCy - faceR)) / (2f * faceR)
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                if (faceR <= 0f || Math.hypot((e.x - faceCx).toDouble(), (e.y - faceCy).toDouble()) > faceR) return false
+                parent?.requestDisallowInterceptTouchEvent(true)
+                grain.pointerDown(gx(e.x), gy(e.y))
+                postInvalidateOnAnimation()
+            }
+            android.view.MotionEvent.ACTION_MOVE -> { grain.pointerMove(gx(e.x), gy(e.y)); postInvalidateOnAnimation() }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> grain.pointerUp()
+        }
+        return true
     }
 
     override fun onDetachedFromWindow() {
