@@ -13,12 +13,12 @@ class Palette(ctx: Context) {
         else -> (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
     }
-    val canvas = Color.parseColor(if (dark) "#000000" else "#FFFFFF")
-    val ink = Color.parseColor(if (dark) "#FFFFFF" else "#000000")
-    val muted = Color.parseColor(if (dark) "#9A9A9A" else "#666666")
-    val surface = Color.parseColor(if (dark) "#121212" else "#F5F5F5")
-    val border = Color.parseColor(if (dark) "#2A2A2A" else "#E5E5E5")
-    val track = Color.parseColor(if (dark) "#3A3A3A" else "#D4D4D4")
+    val canvas = Color.parseColor(if (dark) "#09090B" else "#FFFFFF")
+    val ink = Color.parseColor(if (dark) "#FAFAFA" else "#000000")
+    val muted = Color.parseColor(if (dark) "#A1A1AA" else "#666666")
+    val surface = Color.parseColor(if (dark) "#141417" else "#F5F5F5")
+    val border = Color.parseColor(if (dark) "#27272C" else "#E5E5E5")
+    val track = Color.parseColor(if (dark) "#35353B" else "#D4D4D4")
 }
 
 /** Inter in four weights, bundled in assets/fonts, with system fallbacks. */

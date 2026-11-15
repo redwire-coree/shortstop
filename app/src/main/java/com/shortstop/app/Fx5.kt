@@ -46,6 +46,27 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
 
     fun stop() { live = false }
 
+    // Goal mode: the same dial, but the arc shows progress toward a goal instead of a running clock.
+    private var goalMode = false
+    private var goalFrac = 0f
+    private var goalAnim: android.animation.ValueAnimator? = null
+
+    fun showGoal(frac: Float, animate: Boolean) {
+        goalMode = true
+        live = true
+        calm = false
+        val to = frac.coerceIn(0f, 1f)
+        goalAnim?.cancel()
+        if (!animate) { goalFrac = to; postInvalidateOnAnimation(); return }
+        goalAnim = android.animation.ValueAnimator.ofFloat(goalFrac, to).apply {
+            duration = 1100
+            interpolator = SpringInterpolator(9f, 0.9f, 1.1f)
+            addUpdateListener { goalFrac = it.animatedValue as Float; postInvalidateOnAnimation() }
+            start()
+        }
+        postInvalidateOnAnimation()
+    }
+
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = pal.track
     }
@@ -71,6 +92,9 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
     private val face = Paint(Paint.ANTI_ALIAS_FLAG)
     private val faceEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val sweepM = Matrix()
+    private var shadowShader: RadialGradient? = null
+    private val shadowP = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val shadowM = Matrix()
     private var haloShader: RadialGradient? = null
     private val haloM = Matrix()
 
@@ -87,16 +111,30 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         val sw = 5f * d
         val r = size / 2f - 30f * d
         val now = System.currentTimeMillis()
-        val frac = if (endMs > startMs) ((now - startMs).toFloat() / (endMs - startMs)).coerceIn(0f, 1f) else 0f
+        val frac = if (goalMode) goalFrac.coerceIn(0f, 1f) else if (endMs > startMs) ((now - startMs).toFloat() / (endMs - startMs)).coerceIn(0f, 1f) else 0f
 
         // the dial face: a soft raised disc inside the ring
         faceR = r - 14f * d
         faceCx = cx
         faceCy = cy
-        for (k in 5 downTo 1) {
-            face.color = Color.argb(if (pal.dark) 22 else 10, 0, 0, 0)
-            c.drawCircle(cx, cy + 3f * d, faceR + k * 2.2f * d, face)
+        if (shadowShader == null) {
+            val a = if (pal.dark) 150 else 46
+            shadowShader = RadialGradient(
+                0f, 0f, 1f,
+                intArrayOf(Color.argb(a, 0, 0, 0), Color.argb(a * 6 / 10, 0, 0, 0), Color.argb(0, 0, 0, 0)),
+                floatArrayOf(0.74f, 0.88f, 1f), Shader.TileMode.CLAMP
+            )
+            shadowP.shader = shadowShader
         }
+        // wide soft drop shadow, then a tight contact shadow right under the edge
+        shadowM.setScale(faceR * 1.42f, faceR * 1.42f); shadowM.postTranslate(cx, cy + 12f * d)
+        shadowShader!!.setLocalMatrix(shadowM)
+        shadowP.alpha = 255
+        c.drawCircle(cx, cy + 12f * d, faceR * 1.42f, shadowP)
+        shadowM.setScale(faceR * 1.1f, faceR * 1.1f); shadowM.postTranslate(cx, cy + 3f * d)
+        shadowShader!!.setLocalMatrix(shadowM)
+        shadowP.alpha = 140
+        c.drawCircle(cx, cy + 3f * d, faceR * 1.1f, shadowP)
         // react-bits Grainient, Ember preset: flowing grainy gradient you can stir with a finger
         grain.step()
         grain.drawDisc(c, cx, cy, faceR, d)
@@ -151,7 +189,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         val sec = ((now / 1000L) % 60L).toInt()
         val within = (now % 1000L) / 1000f
         val dr = r - 30f * d
-        for (i in 0 until 60) {
+        for (i in 0 until (if (goalMode) 0 else 60)) {
             val ang = Math.toRadians((-90.0 + i * 6.0))
             val px = cx + dr * Math.cos(ang).toFloat()
             val py = cy + dr * Math.sin(ang).toFloat()
@@ -168,12 +206,14 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         }
 
         // digits, sized to sit inside the dots
-        var ts = size * 0.215f
+        // one size for the whole session: fitted against the widest digits of the same length, so nothing
+        // changes size as the numbers tick and nothing can leave the circle
+        var ts = size * (if (goalMode) 0.2f else 0.215f)
+        val inner = (if (goalMode) faceR * 2f * 0.8f else dr * 2f - 28f * d)
+        val template = big.map { if (it.isDigit()) '8' else it }.joinToString("")
         bigP.textSize = ts
-        val inner = dr * 2f - 28f * d
-        // the roll painter draws digit by digit, so measure the same way
-        while (bigP.measureText(big) > inner && ts > 20f * d) {
-            ts -= 1f * d
+        while (bigP.measureText(template) > inner && ts > 18f * d) {
+            ts -= 0.5f * d
             bigP.textSize = ts
         }
         val base = cy + ts * 0.2f

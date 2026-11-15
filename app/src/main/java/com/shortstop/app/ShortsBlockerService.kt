@@ -153,8 +153,8 @@ class ShortsBlockerService : AccessibilityService() {
             }
         }
 
-        // 3. Websites inside a browser
-        if (sitesCache.isNotEmpty() && BROWSER_IDS.containsKey(pkg) && now - lastUrlCheck > 400) {
+        // 3. Websites inside a browser (the address bar is read; any browser works, known ones are just quicker)
+        if (sitesCache.isNotEmpty() && isBrowser(pkg) && now - lastUrlCheck > 250) {
             lastUrlCheck = now
             val root = rootInActiveWindow
             if (root != null && root.packageName?.toString() == pkg) {
@@ -184,15 +184,41 @@ class ShortsBlockerService : AccessibilityService() {
         return if (t.contains('.')) t else null
     }
 
+    private fun isBrowser(pkg: String): Boolean =
+        BROWSER_IDS.containsKey(pkg) || BROWSERISH.any { pkg.contains(it) }
+
+    private fun matchBlocked(host: String): String? {
+        for (d in sitesCache) if (host == d || host.endsWith(".$d")) return d
+        return null
+    }
+
     private fun blockedDomainOn(pkg: String, root: AccessibilityNodeInfo): String? {
-        val ids = BROWSER_IDS[pkg] ?: return null
-        for (id in ids) {
-            val nodes = root.findAccessibilityNodeInfosByViewId(id)
-            if (nodes.isNullOrEmpty()) continue
-            val host = hostOf(nodes[0].text?.toString() ?: continue) ?: continue
-            for (d in sitesCache) {
-                if (host == d || host.endsWith(".$d")) return d
+        // 1. the known address-bar ids
+        BROWSER_IDS[pkg]?.let { ids ->
+            for (id in ids) {
+                val nodes = root.findAccessibilityNodeInfosByViewId(id)
+                if (nodes.isNullOrEmpty()) continue
+                for (n in nodes) {
+                    val host = hostOf(n.text?.toString() ?: continue) ?: continue
+                    matchBlocked(host)?.let { return it }
+                }
             }
+        }
+        // 2. any browser: look through the top of the window for the address bar
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 220) {
+            val n = queue.removeFirst()
+            seen++
+            val id = n.viewIdResourceName?.lowercase()
+            val looksLikeBar = (id != null && URL_HINTS.any { id.contains(it) }) ||
+                n.className?.toString()?.endsWith("EditText") == true
+            if (looksLikeBar) {
+                val host = hostOf(n.text?.toString() ?: "")
+                if (host != null) matchBlocked(host)?.let { return it }
+            }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
         }
         return null
     }
@@ -517,7 +543,17 @@ class ShortsBlockerService : AccessibilityService() {
             ),
             "org.mozilla.fenix" to listOf("org.mozilla.fenix:id/mozac_browser_toolbar_url_view"),
             "com.opera.browser" to listOf("com.opera.browser:id/url_field"),
-            "com.duckduckgo.mobile.android" to listOf("com.duckduckgo.mobile.android:id/omnibarTextInput")
+            "com.duckduckgo.mobile.android" to listOf("com.duckduckgo.mobile.android:id/omnibarTextInput"),
+            "com.mi.globalbrowser" to listOf("com.mi.globalbrowser:id/url", "com.mi.globalbrowser:id/addressbar_url"),
+            "com.android.browser" to listOf("com.android.browser:id/url"),
+            "com.miui.browser" to listOf("com.miui.browser:id/url")
+        )
+
+        private val BROWSERISH = listOf(
+            "browser", "chrome", "firefox", "opera", "brave", "vivaldi", "duckduckgo", "edge", "emmx", "samsung.android.app.sbrowser"
+        )
+        private val URL_HINTS = listOf(
+            "url_bar", "url_field", "urlbar", "omnibox", "location_bar", "address", "toolbar_url", "url_view", "search_box"
         )
 
         private val CLASSIC_IDS = listOf(

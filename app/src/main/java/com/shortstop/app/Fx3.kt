@@ -765,8 +765,8 @@ class CallChip(ctx: Context, private val pal: Palette, private val fonts: Fonts)
     }
     private val rect = RectF()
     private val clip = Path()
-    // the Atom logo from react-bits Shape Blur, in a 26dp frame (the logo itself is 0.6 of it, 16dp like the old glyph)
-    private val logo = ShapeBlurLogo(ctx, 26f, pal.dark, pal.ink)
+    // the Atom logo from react-bits Shape Blur, in a 33dp frame (the logo itself is 0.6 of it, about 20dp)
+    private val logo = ShapeBlurLogo(ctx, 33f, pal.dark, pal.ink)
 
     fun set(name: String, arg: String, timer: String?, progress: Float, state: Int) {
         val prev = this.state
@@ -795,7 +795,7 @@ class CallChip(ctx: Context, private val pal: Palette, private val fonts: Fonts)
     private fun measureWidth(): Int {
         nameP.textSize = context.dp3(13f)
         argP.textSize = context.dp3(13f)
-        var w = context.dp3(10f) + context.dp3(16f) + context.dp3(8f) + nameP.measureText(name)
+        var w = context.dp3(10f) + context.dp3(22f) + context.dp3(6f) + nameP.measureText(name)
         if (arg.isNotEmpty()) w += context.dp3(6f) + argP.measureText(arg)
         timer?.let { w += context.dp3(8f) + argP.measureText("0") * it.length }
         w += context.dp3(12f)
@@ -838,12 +838,12 @@ class CallChip(ctx: Context, private val pal: Palette, private val fonts: Fonts)
                 c.drawLine(ix + 1f, cy - s, ix + s * 2.6f, cy + s, icon)
                 c.drawLine(ix + s * 2.6f, cy - s, ix + 1f, cy + s, icon)
             }
-            else -> logo.draw(c, ix + context.dp3(8f), cy)
+            else -> logo.draw(c, ix + context.dp3(11f), cy)
         }
         nameP.textSize = context.dp3(13f)
         argP.textSize = context.dp3(13f)
         val base = cy - (nameP.ascent() + nameP.descent()) / 2f
-        var x = ix + context.dp3(16f) + context.dp3(8f)
+        var x = ix + context.dp3(22f) + context.dp3(6f)
         c.drawText(name, x, base, nameP)
         x += nameP.measureText(name)
         if (arg.isNotEmpty()) {
@@ -991,7 +991,7 @@ class CurvedBar(
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) {
-                btn.animate().alpha(if (s.isNullOrBlank()) 0.6f else 1f).setDuration(160).start()
+                btn.animate().alpha(1f).setDuration(160).start()
             }
         })
         row.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)))

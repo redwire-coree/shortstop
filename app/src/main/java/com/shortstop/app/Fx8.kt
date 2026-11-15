@@ -23,7 +23,7 @@ import android.os.Build
 class ShapeBlurLogo(private val ctx: Context, private val containerDp: Float, private val dark: Boolean, private val inkDark: Int) {
     private val d = ctx.resources.displayMetrics.density
     private val v = Math.round(containerDp * d).coerceAtLeast(8)
-    private val sup = 2
+    private val sup = 3
     private val mask: Bitmap?
     private val tint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -46,7 +46,15 @@ class ShapeBlurLogo(private val ctx: Context, private val containerDp: Float, pr
             val s = c * SIZE
             val o = (c - s) / 2f
             val dst = android.graphics.RectF(o, o, o + s, o + s)
-            cv.drawBitmap(src, null, dst, tint)
+            // shrink in halves so the logo is properly smoothed instead of skipping pixels
+            var cur = src
+            while (cur.width / 2 >= s.toInt() * 1.0f && cur.width > 8) {
+                val nxt = Bitmap.createScaledBitmap(cur, cur.width / 2, cur.height / 2, true)
+                if (cur !== src) cur.recycle()
+                cur = nxt
+            }
+            cv.drawBitmap(cur, null, dst, tint)
+            if (cur !== src) cur.recycle()
             src.recycle()
         } catch (e: Exception) { m = null }
         mask = m
@@ -60,6 +68,7 @@ class ShapeBlurLogo(private val ctx: Context, private val containerDp: Float, pr
     private fun build(m: Bitmap): Any {
         val sh = RuntimeShader(SRC)
         val bs = BitmapShader(m, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        bs.setFilterMode(BitmapShader.FILTER_MODE_LINEAR)
         val mx = Matrix()
         mx.setScale(1f / sup, 1f / sup)
         bs.setLocalMatrix(mx)

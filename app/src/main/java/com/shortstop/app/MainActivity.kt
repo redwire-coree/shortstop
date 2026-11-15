@@ -74,6 +74,9 @@ class MainActivity : Activity() {
     private var statusChip: CallChip? = null
     private var setupCard: View? = null
     private var runExtras: View? = null
+    private var sitesCountView: OdometerView? = null
+    private var suggestBox: LinearLayout? = null
+    private var lastAddedSite: String? = null
     private var schedTitle: TextView? = null
     private var schedSub: TextView? = null
     private var schedDot: LiveDot? = null
@@ -1238,11 +1241,11 @@ class MainActivity : Activity() {
                 col.addView(dayRings(weekStart(0)))
                 val today = Calendar.getInstance()
                 val mins = Store.focusMinutesOn(this, today)
-                val ring = RingView(this, pal, fonts, 220, 14, true)
+                val ring = TimerDial(this, pal, fonts)
                 ring.big = fmtMin(mins)
                 ring.small = "Focus goal ${fmtMin(goal)}"
-                ring.setProgress(if (goal > 0) mins.toFloat() / goal else 0f, true, 900)
-                col.addView(ring, lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(10) })
+                ring.showGoal(if (goal > 0) mins.toFloat() / goal else 0f, true)
+                col.addView(ring, lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(6) })
                 col.addView(pill("Edit goal", false) { showGoalSheet() }.apply { textSize = 13f },
                     lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(14) })
 
@@ -1300,11 +1303,11 @@ class MainActivity : Activity() {
                 col.addView(dayRings(start))
                 val vals = (0..6).map { i -> Store.focusMinutesOn(this, (start.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, i) }) }
                 val total = vals.sum()
-                val ring = RingView(this, pal, fonts, 220, 14, true)
+                val ring = TimerDial(this, pal, fonts)
                 ring.big = fmtMin(total)
                 ring.small = "Week goal ${fmtMin(goal * 7)}"
-                ring.setProgress(if (goal > 0) total.toFloat() / (goal * 7) else 0f, true, 900)
-                col.addView(ring, lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(10) })
+                ring.showGoal(if (goal > 0) total.toFloat() / (goal * 7) else 0f, true)
+                col.addView(ring, lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(6) })
                 col.addView(tv("Daily average ${fmtMin(total / 7)}", 14f, fonts.regular, pal.muted, Gravity.CENTER).apply { setPadding(0, dp(12), 0, dp(4)) },
                     lp(matchP, wrapC))
                 val cc = card().apply { setPadding(dp(20), dp(20), dp(20), dp(18)) }
@@ -1429,7 +1432,7 @@ class MainActivity : Activity() {
         })
         box.addView(opts, lp(matchP, wrapC).apply { topMargin = dp(16) })
 
-        box.addView(SlideCommit(this, pal, fonts, "Slide to start", "Started", {
+        box.addView(SlideCommit(this, pal, fonts, "Slide to start", "Focus started", {
             if (!serviceOn()) {
                 toast("Turn on the Shortstop accessibility service first.")
                 open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -2101,6 +2104,22 @@ class MainActivity : Activity() {
 
         // websites
         val webCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(24)) }
+
+        // what is blocked, at a glance
+        val sum = card().apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+        }
+        val cnt = OdometerView(this, pal.ink, fonts.bold, 40f)
+        sitesCountView = cnt
+        sum.addView(cnt, lp(wrapC, wrapC).apply { marginEnd = dp(16) })
+        val sc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        sc.addView(tv("Websites blocked", 16f, fonts.semi, pal.ink))
+        sc.addView(tv("Closed in every browser, all day", 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(3), 0, 0) })
+        sum.addView(sc, lp(0, wrapC, 1f))
+        webCol.addView(sum, lp(matchP, wrapC).apply { bottomMargin = dp(14) })
+
         val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         lateinit var urlInput: EditText
         fun addSite() {
@@ -2109,6 +2128,7 @@ class MainActivity : Activity() {
                 toast("Type a site like reddit.com")
                 return
             }
+            lastAddedSite = d
             Store.addSite(this, d)
             urlInput.setText("")
             refreshSites()
@@ -2117,10 +2137,22 @@ class MainActivity : Activity() {
         urlInput = curved.edit
         addRow.addView(curved, lp(matchP, wrapC))
         webCol.addView(addRow)
+
+        // one-tap popular sites
+        webCol.addView(groupLabel("Popular").apply { setPadding(dp(4), dp(16), 0, dp(8)) })
+        val sugScroll = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+        val sug = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        suggestBox = sug
+        sugScroll.addView(sug)
+        webCol.addView(sugScroll, lp(matchP, wrapC))
+
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         sitesBox = box
-        webCol.addView(box, lp(matchP, wrapC).apply { topMargin = dp(14) })
-        webCol.addView(note("Works inside Chrome, Brave, Edge, Firefox, Samsung Internet, Opera, Vivaldi and DuckDuckGo by reading the address bar."))
+        webCol.addView(box, lp(matchP, wrapC).apply { topMargin = dp(16) })
+        webCol.addView(note("Works inside Chrome, Brave, Edge, Firefox, Samsung Internet, Opera, Vivaldi, DuckDuckGo and most other browsers by reading the address bar."))
         webPane.addView(webCol, FrameLayout.LayoutParams(matchP, wrapC))
         refreshSites()
 
@@ -2136,24 +2168,70 @@ class MainActivity : Activity() {
         val box = sitesBox ?: return
         box.removeAllViews()
         val sites = Store.blockedSites(this)
+        sitesCountView?.setValue(sites.size)
+
+        // popular chips (the ones already blocked drop out)
+        suggestBox?.let { sug ->
+            sug.removeAllViews()
+            val popular = listOf("instagram.com", "youtube.com", "x.com", "reddit.com", "facebook.com", "tiktok.com", "netflix.com", "twitch.tv", "snapchat.com", "pinterest.com")
+            val left = popular.filter { it !in sites }
+            left.forEachIndexed { i, dom ->
+                val chip = pill(dom, false) {
+                    if (free()) {
+                        lastAddedSite = dom
+                        Store.addSite(this, dom)
+                        refreshSites()
+                    }
+                }.apply { textSize = 13f; setPadding(dp(16), dp(10), dp(16), dp(10)) }
+                sug.addView(chip, lp(wrapC, wrapC).apply { if (i < left.size - 1) marginEnd = dp(8) })
+            }
+            (sug.parent as? View)?.visibility = if (left.isEmpty()) View.GONE else View.VISIBLE
+        }
+
         if (sites.isEmpty()) {
-            box.addView(tv("No websites blocked yet.", 14f, fonts.regular, pal.muted, Gravity.CENTER).apply {
-                setPadding(0, dp(28), 0, dp(12))
-            }, lp(matchP, wrapC))
+            box.addView(tv("No websites yet", 18f, fonts.semi, pal.ink, Gravity.CENTER).apply { setPadding(0, dp(30), 0, dp(6)) }, lp(matchP, wrapC))
+            box.addView(tv("Type a site above, or tap one of the popular ones.", 14f, fonts.regular, pal.muted, Gravity.CENTER), lp(matchP, wrapC))
             return
         }
-        for (d in sites) {
+        sites.forEachIndexed { i, d ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 background = round(pal.surface, 24, pal.border, dp(1))
-                setPadding(dp(20), dp(12), dp(14), dp(12))
+                setPadding(dp(14), dp(12), dp(12), dp(12))
             }
-            row.addView(tv(d, 16f, fonts.semi, pal.ink), lp(0, wrapC, 1f))
-            row.addView(pill("Remove", false) {
-                if (free()) { Store.removeSite(this, d); refreshSites() }
-            }.apply { textSize = 13f; setPadding(dp(16), dp(9), dp(16), dp(9)) })
+            row.addView(tv(d.first().uppercaseChar().toString(), 16f, fonts.bold, pal.canvas, Gravity.CENTER).apply {
+                background = round(pal.ink, 14)
+            }, lp(dp(40), dp(40)).apply { marginEnd = dp(14) })
+            val txt = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            txt.addView(tv(d, 16f, fonts.semi, pal.ink))
+            txt.addView(tv("Blocked in all browsers", 12f, fonts.regular, pal.muted).apply { setPadding(0, dp(2), 0, 0) })
+            row.addView(txt, lp(0, wrapC, 1f))
+            row.addView(tv("✕", 14f, fonts.semi, pal.muted, Gravity.CENTER).apply {
+                background = round(pal.canvas, 40, pal.border, dp(1))
+                isClickable = true
+                press(this)
+                setOnClickListener {
+                    if (free()) {
+                        Store.removeSite(this@MainActivity, d)
+                        refreshSites()
+                        toast("Removed", d, "Undo") {
+                            lastAddedSite = d
+                            Store.addSite(this@MainActivity, d)
+                            refreshSites()
+                        }
+                    }
+                }
+            }, lp(dp(36), dp(36)))
             box.addView(row, lp(matchP, wrapC).apply { bottomMargin = dp(8) })
+            if (d == lastAddedSite) {
+                lastAddedSite = null
+                row.alpha = 0f
+                row.translationY = dp(12).toFloat()
+                row.scaleX = 0.97f
+                row.animate().alpha(1f).translationY(0f).scaleX(1f).setDuration(520)
+                    .setInterpolator(SpringInterpolator(14f, 0.8f, 0.9f)).start()
+            }
         }
     }
 
@@ -2258,39 +2336,49 @@ class MainActivity : Activity() {
         charts = ArrayList()
 
         val week = (0..6).map { Store.blockedOn(this, it) }.sum()
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
-        val big = card().apply { setPadding(dp(18), dp(18), dp(18), dp(18)); gravity = Gravity.BOTTOM }
-        big.addView(OdometerView(this, pal.ink, fonts.bold, 56f).apply { setValue(Store.today(this@MainActivity)) })
-        big.addView(tv("Blocked today", 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(4), 0, 0) })
-        row.addView(big, LinearLayout.LayoutParams(0, matchP, 1.15f))
-        val side = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        listOf(week to "This week", Store.total(this) to "All time").forEachIndexed { i, p ->
-            val tile = card().apply { setPadding(dp(16), dp(14), dp(16), dp(14)) }
-            tile.addView(statTile(p.first, p.second))
-            side.addView(tile, lp(matchP, wrapC).apply { if (i > 0) topMargin = dp(8) })
+        // hero: today's count, how it compares with yesterday, and the last two weeks as a line
+        val hero = card().apply { setPadding(dp(20), dp(18), dp(20), dp(8)) }
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        top.addView(tv("Blocked today", 14f, fonts.medium, pal.muted), lp(0, wrapC, 1f))
+        val todayN = Store.today(this)
+        val yest = Store.blockedOn(this, 1)
+        val diff = todayN - yest
+        val delta = when {
+            todayN == 0 && yest == 0 -> "Clean so far"
+            diff == 0 -> "Same as yesterday"
+            diff > 0 -> "+$diff vs yesterday"
+            else -> "−${-diff} vs yesterday"
         }
-        row.addView(side, lp(0, wrapC, 1f).apply { marginStart = dp(8) })
-        col.addView(row, lp(matchP, wrapC).apply { topMargin = dp(12) })
+        top.addView(tv(delta, 12f, fonts.semi, pal.ink, Gravity.CENTER).apply {
+            background = round(pal.canvas, 40, pal.border, dp(1))
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+        })
+        hero.addView(top, lp(matchP, wrapC))
+        hero.addView(OdometerView(this, pal.ink, fonts.bold, 64f).apply { setValue(todayN) }, lp(wrapC, wrapC).apply { topMargin = dp(8) })
+        hero.addView(BlockSpark(this, pal, (13 downTo 0).map { Store.blockedOn(this, it) }), lp(matchP, wrapC).apply { topMargin = dp(10) })
+        col.addView(hero, lp(matchP, wrapC).apply { topMargin = dp(12) })
 
-        col.addView(sectionTitle("Distractions blocked"))
-        val c1 = card().apply { setPadding(dp(20), dp(20), dp(20), dp(18)) }
+        val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
+        listOf(week to "This week", Store.total(this) to "All time", Store.reclaimedMinutes(this) to "Min reclaimed")
+            .forEachIndexed { i, p ->
+                val tile = card().apply { setPadding(dp(14), dp(14), dp(14), dp(14)) }
+                tile.addView(statTile(p.first, p.second))
+                tiles.addView(tile, lp(0, wrapC, 1f).apply { if (i > 0) marginStart = dp(8) })
+            }
+        col.addView(tiles, lp(matchP, wrapC).apply { topMargin = dp(10) })
+
+        col.addView(sectionTitle("Last 7 days"))
+        val c1 = card().apply { setPadding(dp(20), dp(16), dp(20), dp(18)) }
         val vals = (6 downTo 0).map { Store.blockedOn(this, it) }
         val labels = (6 downTo 0).map { Store.dayLetter(it) }
-        val chart1 = BarChart(this, vals, labels, 6)
-        charts.add(chart1)
-        c1.addView(chart1, lp(matchP, wrapC))
-        c1.addView(tv(summaryText(), 14f, fonts.regular, pal.muted).apply { setPadding(0, dp(14), 0, 0) })
+        c1.addView(BlockBars(this, pal, fonts, vals, labels, 6), lp(matchP, wrapC))
+        c1.addView(tv(summaryText(), 14f, fonts.regular, pal.muted).apply { setPadding(0, dp(12), 0, 0) })
         col.addView(c1, lp(matchP, wrapC))
 
         col.addView(sectionTitle("When you scroll most"))
         val c2 = card().apply { setPadding(dp(20), dp(20), dp(20), dp(18)) }
-        val byHour = Store.blocksByHour(this)
-        val buckets = (0..7).map { i -> byHour.subList(i * 3, i * 3 + 3).sum() }
-        val peak = if (buckets.sum() == 0) -1 else (buckets.indices.maxByOrNull { buckets[it] } ?: -1)
-        val chart2 = BarChart(this, buckets, listOf("12a", "3a", "6a", "9a", "12p", "3p", "6p", "9p"), peak)
-        charts.add(chart2)
-        c2.addView(chart2, lp(matchP, wrapC))
-        c2.addView(tv(peakText(), 14f, fonts.regular, pal.muted).apply { setPadding(0, dp(14), 0, 0) })
+        c2.addView(HeatStrip(this, pal, fonts, Store.blocksByHour(this)), lp(matchP, wrapC))
+        c2.addView(tv(peakText(), 14f, fonts.regular, pal.muted).apply { setPadding(0, dp(10), 0, 0) })
         col.addView(c2, lp(matchP, wrapC))
 
         col.addView(sectionTitle("Streaks and rewards"))

@@ -203,6 +203,9 @@ class HoldPill(
     }
 }
 
+private val SLIDE_GREEN = Color.parseColor("#86EFAC")
+private val SLIDE_DEEP = Color.parseColor("#14532D")
+
 // ------------------------------------------------------------------ Slide to confirm
 
 /**
@@ -230,6 +233,13 @@ class SlideCommit(
     private var phase = 0
     private var doneT = 0f
     private var spin = 0f
+    private var checkT = 0f
+    private val greenP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SLIDE_GREEN }
+    private val checkP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = SLIDE_DEEP; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; strokeWidth = ctx.dpf(2.6f)
+    }
+    private val checkPath = Path()
+    private val checkSeg = Path()
     private var anim: ValueAnimator? = null
     private var spinAnim: ValueAnimator? = null
     private val trackP = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -283,15 +293,20 @@ class SlideCommit(
         val hx = pad + pos * run() + nudge
         val cxh = hx + hd / 2f
         rect.set(0f, 0f, w, h)
-        trackP.color = mixColor(pal.surface, pal.ink, doneT)
+        trackP.color = pal.surface
         c.drawRoundRect(rect, r, r, trackP)
         clip.reset()
         clip.addRoundRect(rect, r, r, Path.Direction.CW)
         c.save()
         c.clipPath(clip)
         if (phase < 2 && pos > 0f) {
-            wipeP.color = mixColor(pal.surface, pal.ink, 0.06f + 0.12f * pos.coerceIn(0f, 1f))
+            // the wash behind the handle turns light green once you are far enough to let go
+            wipeP.color = mixColor(mixColor(pal.surface, pal.ink, 0.06f + 0.12f * pos.coerceIn(0f, 1f)), SLIDE_GREEN, armT)
             c.drawRect(0f, 0f, cxh, h, wipeP)
+        }
+        if (doneT > 0.005f) {
+            val e = 1f - (1f - doneT) * (1f - doneT) * (1f - doneT)
+            c.drawCircle(cxh, h / 2f, Math.hypot(w.toDouble(), h.toDouble()).toFloat() * e, greenP)
         }
         txt.textSize = context.dpf(15f)
         val cy = h / 2f - (txt.ascent() + txt.descent()) / 2f
@@ -318,16 +333,22 @@ class SlideCommit(
             txt.shader = null
         }
         if (doneT > 0.01f) {
-            txt.color = pal.canvas
-            txt.alpha = (255 * doneT).toInt()
-            c.drawText(doneLabel, w / 2f + context.dpf(12f), cy, txt)
+            val la = ((doneT - 0.35f) / 0.65f).coerceIn(0f, 1f)
+            txt.color = SLIDE_DEEP
+            txt.alpha = (255 * la).toInt()
+            val lx = w / 2f + context.dpf(14f)
+            c.drawText(doneLabel, lx, cy, txt)
             val tw = txt.measureText(doneLabel)
-            val ix = w / 2f + context.dpf(12f) - tw / 2f - context.dpf(18f)
-            icon.alpha = (255 * doneT).toInt()
-            val s = context.dpf(6f)
-            c.drawLine(ix - s, h / 2f, ix - s * 0.3f, h / 2f + s * 0.7f, icon)
-            c.drawLine(ix - s * 0.3f, h / 2f + s * 0.7f, ix + s, h / 2f - s * 0.7f, icon)
-            icon.alpha = 255
+            val ix = lx - tw / 2f - context.dpf(20f)
+            val s = context.dpf(7f)
+            checkPath.reset()
+            checkPath.moveTo(ix - s, h / 2f)
+            checkPath.lineTo(ix - s * 0.3f, h / 2f + s * 0.75f)
+            checkPath.lineTo(ix + s, h / 2f - s * 0.75f)
+            val pm = android.graphics.PathMeasure(checkPath, false)
+            checkSeg.reset()
+            pm.getSegment(0f, pm.length * checkT, checkSeg, true)
+            c.drawPath(checkSeg, checkP)
         }
         // the landing spot at the far end: it lights up once you are far enough to let go
         if (doneT < 0.5f) {
@@ -403,27 +424,24 @@ class SlideCommit(
         pos = 1f
         tpos = 1f
         invalidate()
-        animate().scaleY(0.974f).setDuration(70).withEndAction { animate().scaleY(1f).setDuration(140).start() }.start()
+        animate().scaleY(0.974f).setDuration(70).withEndAction { animate().scaleY(1f).setDuration(160).start() }.start()
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         if (!validate()) { springBack(); return }
-        phase = 1
-        spinAnim = ValueAnimator.ofFloat(0f, 360f).apply {
-            duration = 800
-            repeatCount = ValueAnimator.INFINITE
+        phase = 2
+        anim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 560
             interpolator = LinearInterpolator()
-            addUpdateListener { spin = it.animatedValue as Float; invalidate() }
+            addUpdateListener { doneT = it.animatedValue as Float; invalidate() }
+            onFinish { postDelayed({ onDone() }, 480) }
             start()
         }
-        postDelayed({
-            spinAnim?.cancel()
-            phase = 2
-            anim = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 380
-                addUpdateListener { doneT = it.animatedValue as Float; invalidate() }
-                onFinish { postDelayed({ onDone() }, 300) }
-                start()
-            }
-        }, 650)
+        spinAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 460
+            startDelay = 220
+            interpolator = DecelerateInterpolator(1.6f)
+            addUpdateListener { checkT = it.animatedValue as Float; invalidate() }
+            start()
+        }
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
