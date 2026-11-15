@@ -1031,16 +1031,45 @@ class MainActivity : Activity() {
     private fun onSessionDone() {
         fillFocusStats()
         val last = Store.sessions(this).lastOrNull() ?: return
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
-        box.addView(display(fmtMin(last.minutes), 44f))
-        box.addView(tv("${last.tag.ifEmpty { "Focus" }} session finished.", 15f, fonts.regular, pal.muted).apply { setPadding(0, dp(6), 0, dp(16)) })
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(4)) }
+        val tag = last.tag.ifEmpty { "Focus" }
+        val streak = Store.streak(this)
+        val praise = when {
+            last.minutes < 10 -> "Short and clean."
+            last.minutes < 25 -> "A clean sprint."
+            last.minutes < 45 -> "Real focus."
+            last.minutes < 90 -> "Deep work. Well done."
+            last.minutes < 180 -> "Serious focus. Be proud."
+            last.minutes < 300 -> "Marathon focus. Rare."
+            else -> "Hours of pure focus. Unreal."
+        }
+        val data = FocusCardData(
+            badge = if (last.done) "Focus complete" else "Session ended",
+            status = if (last.done) "Done" else "Ended",
+            eyebrow = "FOCUSED FOR",
+            big = fmtMin(last.minutes),
+            line = "$tag · $praise",
+            stats = listOf(
+                "Today" to fmtMin(Store.focusMinutesAgo(this, 0)),
+                "Streak" to (if (streak == 1) "1 day" else "$streak days"),
+                "Blocked" to Store.total(this).toString()
+            ),
+            idLabel = "Get Shortstop",
+            idValue = APP_LINK_SHORT
+        )
+        val card = ReflectiveCard(this, fonts, data)
+        box.addView(card, lp(matchP, wrapC))
         val heartRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        heartRow.addView(tv("Sessions you kept", 14f, fonts.regular, pal.muted), lp(0, wrapC, 1f))
+        heartRow.addView(tv("Keep this session", 14f, fonts.regular, pal.muted), lp(0, wrapC, 1f))
         heartRow.addView(PulseHeart(this, pal, fonts, Store.lovedCount(this), Store.isLoved(this, last.start), true) { on, _ ->
             Store.setLoved(this, last.start, on)
         }, lp(wrapC, wrapC))
-        box.addView(heartRow, lp(matchP, wrapC).apply { bottomMargin = dp(18) })
-        box.addView(pill("Done", true) { closeSheet() }, lp(matchP, wrapC))
+        box.addView(heartRow, lp(matchP, wrapC).apply { bottomMargin = dp(14) })
+        val shareText = "I stayed focused for ${fmtMin(last.minutes)} with Shortstop. No Shorts, no Reels, just the work.\n$APP_LINK"
+        val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        btns.addView(pill("Share", true) { shareFocusCard(this, card, shareText) }, lp(0, wrapC, 1f).apply { rightMargin = dp(10) })
+        btns.addView(pill("Done", false) { closeSheet() }, lp(0, wrapC, 1f))
+        box.addView(btns, lp(matchP, wrapC))
         showSheet("Session complete", box)
     }
 
