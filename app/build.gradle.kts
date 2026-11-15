@@ -11,8 +11,8 @@ android {
         applicationId = "com.shortstop.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 15
-        versionName = "6.9"
+        versionCode = 16
+        versionName = "7.0"
     }
 
     // One fixed key for every build, so new APKs install over old ones.

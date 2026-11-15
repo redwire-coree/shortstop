@@ -1677,35 +1677,64 @@ class MainActivity : Activity() {
         var start = existing?.start ?: 18 * 60
         var end = existing?.end ?: 20 * 60
         var days = existing?.days ?: 31
+        var editing = 0
 
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val nameInput = input("Name")
         nameInput.setText(name)
         watch(nameInput) { name = it }
         val preview = DayBar(this, pal, fonts, true).apply { set(start, end, true, false) }
-        val startBtn = pill(fmt12(start), false) {}
-        val endBtn = pill(fmt12(end), false) {}
+
+        // Start / End tiles: tap one, then spin the wheel
+        val startVal = tv(fmt12(start), 20f, fonts.bold, pal.ink).apply { letterSpacing = -0.01f }
+        val endVal = tv(fmt12(end), 20f, fonts.bold, pal.ink).apply { letterSpacing = -0.01f }
+        fun tile(label: String, v: TextView): LinearLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            isClickable = true
+            addView(tv(label, 11f, fonts.semi, pal.muted).apply { letterSpacing = 0.14f })
+            addView(v, lp(wrapC, wrapC).apply { topMargin = dp(4) })
+            press(this)
+        }
+        val startTile = tile("STARTS", startVal)
+        val endTile = tile("ENDS", endVal)
+        lateinit var wheel: TimeWheel
+        fun paintTiles() {
+            listOf(startTile, endTile).forEachIndexed { i, t ->
+                val on = editing == i
+                t.background = round(if (on) pal.canvas else pal.surface, 18, if (on) pal.ink else pal.border, dp(if (on) 2 else 1))
+            }
+        }
+        wheel = TimeWheel(this, pal, fonts, start) { m ->
+            if (editing == 0) { start = m; startVal.text = fmt12(m) } else { end = m; endVal.text = fmt12(m) }
+            preview.set(start, end, true, true)
+        }
+        startTile.setOnClickListener { editing = 0; paintTiles(); wheel.set(start, true) }
+        endTile.setOnClickListener { editing = 1; paintTiles(); wheel.set(end, true) }
+        paintTiles()
+
         val dayChips = ArrayList<TextView>()
         fun paintDays() { dayChips.forEachIndexed { i, c -> setPill(c, ((days shr i) and 1) == 1) } }
-        fun fillForm(n: String, s: Int, e: Int, d: Int) {
-            name = n; start = s; end = e; days = d
+        fun fillForm(n: String, st: Int, en: Int, d: Int) {
+            name = n; start = st; end = en; days = d
             nameInput.setText(n)
-            startBtn.text = fmt12(s)
-            endBtn.text = fmt12(e)
-            preview.set(s, e, true, true)
+            startVal.text = fmt12(st)
+            endVal.text = fmt12(en)
+            wheel.set(if (editing == 0) st else en, true)
+            preview.set(st, en, true, true)
             paintDays()
         }
 
         if (existing == null) {
-            box.addView(groupLabel("Templates").apply { setPadding(dp(4), 0, 0, dp(6)) })
+            box.addView(groupLabel("Quick start").apply { setPadding(dp(4), 0, 0, dp(6)) })
             val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val templates = listOf(
                 Triple("Morning Study", 6 * 60, 8 * 60),
                 Triple("Evening Study", 18 * 60, 20 * 60),
                 Triple("Night", 22 * 60, 6 * 60)
             )
-            templates.forEachIndexed { i, (n, s, e) ->
-                val c = pill(n, false) { fillForm(n, s, e, if (n == "Night") 127 else 31) }
+            templates.forEachIndexed { i, (n, st, en) ->
+                val c = pill(n, false) { fillForm(n, st, en, if (n == "Night") 127 else 31) }
                 c.textSize = 12f
                 c.setPadding(dp(4), dp(10), dp(4), dp(10))
                 line.addView(c, lp(0, wrapC, 1f).apply { if (i < 2) marginEnd = dp(6) })
@@ -1717,16 +1746,28 @@ class MainActivity : Activity() {
         box.addView(nameInput, lp(matchP, wrapC))
 
         box.addView(groupLabel("Time").apply { setPadding(dp(4), dp(14), 0, dp(6)) })
-        val times = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        startBtn.setOnClickListener { pickTime(start) { m -> start = m; startBtn.text = fmt12(m); preview.set(start, end, true, true) } }
-        endBtn.setOnClickListener { pickTime(end) { m -> end = m; endBtn.text = fmt12(m); preview.set(start, end, true, true) } }
-        times.addView(startBtn, lp(0, wrapC, 1f))
-        times.addView(tv("to", 14f, fonts.regular, pal.muted).apply { setPadding(dp(12), 0, dp(12), 0) })
-        times.addView(endBtn, lp(0, wrapC, 1f))
-        box.addView(times)
+        val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        tiles.addView(startTile, lp(0, wrapC, 1f).apply { marginEnd = dp(10) })
+        tiles.addView(endTile, lp(0, wrapC, 1f))
+        box.addView(tiles)
+        val wheelBox = LinearLayout(this).apply {
+            background = round(pal.surface, 22, pal.border, dp(1))
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+        }
+        wheelBox.addView(wheel, lp(matchP, wrapC))
+        box.addView(wheelBox, lp(matchP, wrapC).apply { topMargin = dp(10) })
         box.addView(preview, lp(matchP, wrapC).apply { topMargin = dp(14) })
+        box.addView(note("Overnight windows work too, for example 10:00 PM to 6:00 AM."))
 
-        box.addView(groupLabel("Active days").apply { setPadding(dp(4), dp(14), 0, dp(6)) })
+        box.addView(groupLabel("Repeat").apply { setPadding(dp(4), dp(14), 0, dp(6)) })
+        val presetLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("Weekdays" to 31, "Weekends" to 96, "Every day" to 127).forEachIndexed { i, (label, mask) ->
+            val c = pill(label, false) { days = mask; paintDays() }
+            c.textSize = 12f
+            c.setPadding(dp(4), dp(10), dp(4), dp(10))
+            presetLine.addView(c, lp(0, wrapC, 1f).apply { if (i < 2) marginEnd = dp(6) })
+        }
+        box.addView(presetLine)
         val dayLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         "MTWTFSS".forEachIndexed { i, ch ->
             val c = pill(ch.toString(), ((days shr i) and 1) == 1) {}
@@ -1736,8 +1777,7 @@ class MainActivity : Activity() {
             dayChips.add(c)
             dayLine.addView(c, lp(0, wrapC, 1f).apply { if (i < 6) marginEnd = dp(4) })
         }
-        box.addView(dayLine)
-        box.addView(note("Overnight windows work too, for example 10:00 PM to 6:00 AM."))
+        box.addView(dayLine, lp(matchP, wrapC).apply { topMargin = dp(8) })
 
         box.addView(pill("Save", true) {
             if (start == end) { toast("Start and end can't be the same."); return@pill }
