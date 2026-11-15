@@ -71,6 +71,8 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
     private val face = Paint(Paint.ANTI_ALIAS_FLAG)
     private val faceEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val sweepM = Matrix()
+    private var haloShader: RadialGradient? = null
+    private val haloM = Matrix()
 
     override fun onMeasure(w: Int, h: Int) {
         val limit = (280f * d).toInt()
@@ -128,12 +130,18 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         if (!calm) {
             val pulse = 0.5f + 0.5f * Math.sin(now / 520.0).toFloat()
             val hr = (13f + 4f * pulse) * d
-            halo.shader = RadialGradient(
-                hx, hy, hr,
-                Color.argb((60 + 30 * pulse).toInt(), Color.red(pal.ink), Color.green(pal.ink), Color.blue(pal.ink)),
-                Color.argb(0, Color.red(pal.ink), Color.green(pal.ink), Color.blue(pal.ink)),
-                Shader.TileMode.CLAMP
-            )
+            if (haloShader == null) {
+                val ik = pal.ink
+                haloShader = RadialGradient(
+                    0f, 0f, 1f, Color.argb(90, Color.red(ik), Color.green(ik), Color.blue(ik)),
+                    Color.argb(0, Color.red(ik), Color.green(ik), Color.blue(ik)), Shader.TileMode.CLAMP
+                )
+                halo.shader = haloShader
+            }
+            haloM.setScale(hr, hr)
+            haloM.postTranslate(hx, hy)
+            haloShader!!.setLocalMatrix(haloM)
+            halo.alpha = (255 * (0.66f + 0.34f * pulse)).toInt()
             c.drawCircle(hx, hy, hr, halo)
         }
         c.drawCircle(hx, hy, sw * 1.05f, ring)

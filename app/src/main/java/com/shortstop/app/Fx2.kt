@@ -1093,7 +1093,7 @@ class SilkView(ctx: Context, private val canvasColor: Int, private val dark: Boo
             c.drawRect(0f, 0f, w, h, spot)
         }
         c.drawRect(0f, 0f, w, h, grain)
-        postInvalidateDelayed(33)
+        if (isShown) postInvalidateDelayed(33)
     }
 
     private fun pal(c: Int) = c

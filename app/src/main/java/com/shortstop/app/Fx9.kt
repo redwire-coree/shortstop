@@ -21,6 +21,9 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette) : View(ctx) {
         color = pal.ink; strokeCap = Paint.Cap.ROUND; strokeWidth = 2.2f * d
     }
     private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var glowShader: RadialGradient? = null
+    private var glowW = 0f
+    private val glowM = android.graphics.Matrix()
     private var pts = FloatArray(0)
     private var fade = FloatArray(0)
     private var dist = FloatArray(0)
@@ -62,12 +65,17 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette) : View(ctx) {
         // the warm glow breathes and drifts a little
         val gx = w * (0.5f + 0.1f * Math.sin(t * 0.25).toFloat())
         val gy = h * (0.27f + 0.03f * Math.cos(t * 0.21).toFloat())
-        val rad = w * 0.8f
         val a = if (pal.dark) 40 else 52
-        glow.shader = RadialGradient(
-            gx, gy, rad, intArrayOf(Color.argb(a, 255, 138, 61), Color.argb(a / 3, 255, 138, 61), Color.argb(0, 255, 138, 61)),
-            floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
-        )
+        if (glowShader == null || glowW != w) {
+            glowW = w
+            glowShader = RadialGradient(
+                0f, 0f, w * 0.8f, intArrayOf(Color.argb(a, 255, 138, 61), Color.argb(a / 3, 255, 138, 61), Color.argb(0, 255, 138, 61)),
+                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+            )
+            glow.shader = glowShader
+        }
+        glowM.setTranslate(gx, gy)
+        glowShader!!.setLocalMatrix(glowM)
         c.drawRect(0f, 0f, w, h, glow)
 
         // dots: alpha follows the distance from the centre, plus a ring that slowly travels outward
