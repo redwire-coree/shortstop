@@ -73,6 +73,13 @@ class MainActivity : Activity() {
     // Focus tab
     private var statusChip: CallChip? = null
     private var setupCard: View? = null
+    private var runExtras: View? = null
+    private var exToday: TextView? = null
+    private var exStreak: TextView? = null
+    private var exBlocked: TextView? = null
+    private var exApps: TextView? = null
+    private var exHome: TextView? = null
+    private var exMode: TextView? = null
     private var setupStepper: SetupStepper? = null
     private var runningCard: View? = null
     private var runRing: TimerDial? = null
@@ -963,6 +970,44 @@ class MainActivity : Activity() {
         runningCard = runWrap
         col.addView(runWrap, lp(matchP, wrapC).apply { topMargin = dp(18) })
 
+        // While a session runs: today's numbers, what is being blocked, and your own reminder
+        val extras = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun tile(label: String): Pair<View, TextView> {
+            val t = card().apply { setPadding(dp(14), dp(16), dp(14), dp(16)); gravity = Gravity.CENTER_HORIZONTAL }
+            val v = tv("", 22f, fonts.bold, pal.ink, Gravity.CENTER).apply { letterSpacing = -0.02f }
+            t.addView(v, lp(matchP, wrapC))
+            t.addView(tv(label, 12f, fonts.medium, pal.muted, Gravity.CENTER).apply { setPadding(0, dp(6), 0, 0) }, lp(matchP, wrapC))
+            return t to v
+        }
+        val (t1, v1) = tile("Today"); val (t2, v2) = tile("Streak"); val (t3, v3) = tile("Blocked")
+        exToday = v1; exStreak = v2; exBlocked = v3
+        tiles.addView(t1, lp(0, wrapC, 1f).apply { marginEnd = dp(10) })
+        tiles.addView(t2, lp(0, wrapC, 1f).apply { marginEnd = dp(10) })
+        tiles.addView(t3, lp(0, wrapC, 1f))
+        extras.addView(tiles, lp(matchP, wrapC).apply { topMargin = dp(14) })
+        val blocking = card().apply { setPadding(dp(20), dp(16), dp(20), dp(8)) }
+        blocking.addView(tv("Blocking now", 15f, fonts.semi, pal.ink).apply { setPadding(0, 0, 0, dp(10)) }, lp(matchP, wrapC))
+        fun kv(label: String): TextView {
+            val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(10)) }
+            r.addView(tv(label, 14f, fonts.regular, pal.muted), lp(0, wrapC, 1f))
+            val v = tv("", 14f, fonts.semi, pal.ink)
+            r.addView(v, lp(wrapC, wrapC))
+            blocking.addView(r, lp(matchP, wrapC))
+            return v
+        }
+        exApps = kv("Focus apps"); exHome = kv("Home screen"); exMode = kv("Mode")
+        extras.addView(blocking, lp(matchP, wrapC).apply { topMargin = dp(12) })
+        val remind = Store.message(this)
+        if (remind.isNotBlank()) {
+            val rc = card().apply { setPadding(dp(20), dp(18), dp(20), dp(18)) }
+            rc.addView(tv("YOUR REMINDER", 11f, fonts.semi, pal.muted).apply { letterSpacing = 0.14f }, lp(matchP, wrapC))
+            rc.addView(tv(remind, 16f, fonts.medium, pal.ink).apply { setPadding(0, dp(8), 0, 0) }, lp(matchP, wrapC))
+            extras.addView(rc, lp(matchP, wrapC).apply { topMargin = dp(12) })
+        }
+        runExtras = extras
+        col.addView(extras, lp(matchP, wrapC))
+
         // Day / Week / Month
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val (seg, _) = segControl(listOf("Day", "Week", "Month"), focusSeg) { i ->
@@ -999,7 +1044,10 @@ class MainActivity : Activity() {
 
         refreshStatus()
         fillFocusStats()
-        return page
+        val root = FrameLayout(this)
+        root.addView(AmbientBackdrop(this, pal), FrameLayout.LayoutParams(matchP, matchP))
+        root.addView(page, FrameLayout.LayoutParams(matchP, matchP))
+        return root
     }
 
     private fun onBreakClick() {
@@ -1032,7 +1080,26 @@ class MainActivity : Activity() {
         runningCard?.visibility = if (running) View.VISIBLE else View.GONE
         statsWrap?.visibility = if (running) View.GONE else View.VISIBLE
         startBar?.visibility = if (running) View.GONE else View.VISIBLE
+        runExtras?.let { ex ->
+            if (running && ex.visibility != View.VISIBLE) {
+                ex.visibility = View.VISIBLE
+                ex.alpha = 0f
+                ex.translationY = dp(14).toFloat()
+                ex.animate().alpha(1f).translationY(0f).setDuration(520)
+                    .setInterpolator(SpringInterpolator(14f, 0.8f, 0.9f)).start()
+            } else if (!running) ex.visibility = View.GONE
+        }
         if (running) {
+            fun put(v: TextView?, t: String) { if (v != null && v.text.toString() != t) v.text = t }
+            val st = Store.streak(this)
+            put(exToday, fmtMin(Store.focusMinutesAgo(this, 0)))
+            put(exStreak, if (st == 1) "1 day" else "$st days")
+            put(exBlocked, Store.total(this).toString())
+            val fa = Store.focusApps(this).size
+            put(exApps, if (fa == 0) "Always-on only" else "$fa apps")
+            put(exHome, if (Store.blockHome(this)) "Covered" else "Open")
+            put(exMode, listOfNotNull(if (Store.studyMode(this)) "Study" else null, if (Store.focusStrict(this)) "Strict" else null)
+                .joinToString(" · ").ifEmpty { "Standard" })
             val now = System.currentTimeMillis()
             val start = Store.focusStart(this)
             val end = Store.focusEnd(this)

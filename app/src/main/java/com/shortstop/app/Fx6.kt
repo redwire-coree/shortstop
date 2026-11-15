@@ -21,9 +21,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * First-run setup as a stepper (react-bits Stepper): a rail whose raised pill glides between the steps on a spring,
- * numbers that turn into checks the moment Android confirms a step, content that slides across, and Back / Continue.
- * It watches the real state, so coming back from Settings advances it by itself.
+ * First-run setup as a stepper (react-bits Stepper). The rail is a row of numbered circles joined by lines that fill
+ * as you go; the current step swells into a black pill that carries its name, so labels never collide. Below it a
+ * panel slides across with the step, and exactly one button is the main one at any moment: the step's action until
+ * Android confirms it, then Continue. It watches the real state, so coming back from Settings advances it by itself.
  */
 class SetupStepper(
     ctx: Context,
@@ -56,29 +57,24 @@ class SetupStepper(
 
     private val count: TextView
     private val rail: Rail
-    private val content: LinearLayout
+    private val panel: Panel
+    private val eyebrow: TextView
     private val heading: TextView
     private val bodyTv: TextView
-    private val actionBtn: TextView
+    private val actionBtn: Btn
     private val back: TextView
-    private val next: TextView
+    private val next: Btn
     private var glide: ValueAnimator? = null
 
-    private fun text(t: String, sp: Float, face: android.graphics.Typeface, color: Int) = TextView(ctx()).apply {
+    private fun text(t: String, sp: Float, face: android.graphics.Typeface, color: Int) = TextView(context).apply {
         text = t; textSize = sp; typeface = face; setTextColor(color); includeFontPadding = false
-        setLineSpacing(0f, 1.2f)
-    }
-
-    private fun ctx(): Context = context
-
-    private fun pillBg(fill: Int, stroke: Int, strokeW: Int) = GradientDrawable().apply {
-        setColor(fill); cornerRadius = dp(40f).toFloat(); if (strokeW > 0) setStroke(strokeW, stroke)
+        setLineSpacing(0f, 1.25f)
     }
 
     private fun springPress(v: View) {
         v.setOnTouchListener { view, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.95f).scaleY(0.95f).setDuration(80)
+                MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.96f).scaleY(0.96f).setDuration(80)
                     .setInterpolator(DecelerateInterpolator()).start()
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
                     view.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(SpringInterpolator(18f, 0.5f, 0.8f)).start()
@@ -87,63 +83,115 @@ class SetupStepper(
         }
     }
 
+    /** A pill button whose fill, outline and text colours cross-fade between styles. */
+    private inner class Btn(ctx: Context) : TextView(ctx) {
+        private var fill = pal.canvas
+        private var line = pal.border
+        private var ink = pal.ink
+        private var anim: ValueAnimator? = null
+        private val bgd = GradientDrawable().apply { cornerRadius = dp(28f).toFloat() }
+
+        init {
+            background = bgd
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            typeface = fonts.semi
+            textSize = 15f
+            isClickable = true
+            paintTo(fill, line, ink)
+            springPress(this)
+        }
+
+        private fun paintTo(f: Int, s: Int, t: Int) {
+            fill = f; line = s; ink = t
+            bgd.setColor(f)
+            bgd.setStroke(dp(1f), s)
+            setTextColor(t)
+        }
+
+        fun style(f: Int, s: Int, t: Int) {
+            if (f == fill && s == line && t == ink) return
+            anim?.cancel()
+            if (!isAttachedToWindow) { paintTo(f, s, t); return }
+            val f0 = fill; val s0 = line; val t0 = ink
+            anim = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 240
+                addUpdateListener {
+                    val k = it.animatedFraction
+                    paintTo(mixColor(f0, f, k), mixColor(s0, s, k), mixColor(t0, t, k))
+                }
+                start()
+            }
+        }
+
+        fun primary() = style(pal.ink, pal.ink, pal.canvas)
+        fun quiet(muted: Boolean = false) = style(pal.canvas, pal.border, if (muted) pal.muted else pal.ink)
+    }
+
+    /** The step card: a bordered panel with the step number as a faint watermark. */
+    private inner class Panel(ctx: Context) : LinearLayout(ctx) {
+        var mark = ""
+        private val wm = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = fonts.bold; color = pal.ink; alpha = 14; textAlign = Paint.Align.RIGHT; letterSpacing = -0.04f
+        }
+        init {
+            setWillNotDraw(false)
+            orientation = VERTICAL
+            background = GradientDrawable().apply {
+                setColor(pal.canvas); cornerRadius = dp(22f).toFloat(); setStroke(dp(1f), pal.border)
+            }
+            setPadding(dp(20f), dp(20f), dp(20f), dp(20f))
+            minimumHeight = dp(196f)
+        }
+        override fun onDraw(c: Canvas) {
+            super.onDraw(c)
+            if (mark.isEmpty()) return
+            wm.textSize = 84f * sd
+            c.drawText(mark, width - dp(14f).toFloat(), dp(14f) + wm.textSize * 0.78f, wm)
+        }
+    }
+
     init {
         orientation = VERTICAL
-        setPadding(0, dp(14f), 0, dp(14f))
+        setPadding(0, dp(16f), 0, dp(16f))
 
         val head = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val title = text("Set up Shortstop", 20f, fonts.bold, pal.ink).apply { letterSpacing = -0.02f }
         head.addView(title, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         count = text("", 13f, fonts.medium, pal.muted)
         head.addView(count, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        addView(head, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(14f) })
+        addView(head, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(16f) })
 
         rail = Rail(context)
-        addView(rail, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46f)))
+        addView(rail, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40f)))
 
-        content = LinearLayout(context).apply {
-            orientation = VERTICAL
-            minimumHeight = dp(178f)
-            setPadding(dp(2f), dp(20f), dp(2f), 0)
-        }
-        heading = text("", 18f, fonts.bold, pal.ink).apply { letterSpacing = -0.01f }
-        bodyTv = text("", 14f, fonts.regular, pal.muted)
-        actionBtn = TextView(context).apply {
-            textSize = 14f
-            typeface = fonts.semi
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            setPadding(dp(18f), 0, dp(18f), 0)
-            isClickable = true
-        }
-        springPress(actionBtn)
-        content.addView(heading, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        content.addView(bodyTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8f) })
-        content.addView(actionBtn, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42f)).apply { topMargin = dp(16f) })
-        addView(content, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        panel = Panel(context)
+        eyebrow = text("", 11f, fonts.semi, pal.muted).apply { letterSpacing = 0.14f }
+        heading = text("", 20f, fonts.bold, pal.ink).apply { letterSpacing = -0.015f }
+        bodyTv = text("", 14.5f, fonts.regular, pal.muted)
+        actionBtn = Btn(context)
+        panel.addView(eyebrow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        panel.addView(heading, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10f) })
+        panel.addView(bodyTv, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8f) })
+        panel.addView(View(context), LayoutParams(1, 0, 1f))
+        panel.addView(actionBtn, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48f)).apply { topMargin = dp(20f) })
+        addView(panel, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16f) })
 
         val foot = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        back = text("Back", 14f, fonts.medium, pal.muted).apply {
-            setPadding(dp(4f), dp(12f), dp(16f), dp(12f))
+        back = text("‹  Back", 14.5f, fonts.medium, pal.muted).apply {
+            setPadding(dp(4f), dp(14f), dp(20f), dp(14f))
             isClickable = true
             setOnClickListener { if (index > 0) goTo(index - 1) }
         }
-        next = TextView(context).apply {
-            textSize = 14f
-            typeface = fonts.semi
-            setTextColor(pal.canvas)
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            background = pillBg(pal.ink, 0, 0)
-            setPadding(dp(22f), 0, dp(22f), 0)
-            isClickable = true
+        next = Btn(context).apply {
+            setPadding(dp(28f), 0, dp(28f), 0)
+            minWidth = dp(140f)
             setOnClickListener { onNext() }
         }
-        springPress(next)
         foot.addView(back, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         foot.addView(View(context), LayoutParams(0, 1, 1f))
-        foot.addView(next, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44f)))
-        addView(foot, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8f) })
+        foot.addView(next, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(48f)))
+        addView(foot, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16f) })
 
         rail.onSelect = { i -> if (i != index) goTo(i) }
         bind()
@@ -197,55 +245,58 @@ class SetupStepper(
         index = i
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
         rail.glideTo(i)
-        content.animate().cancel()
-        content.animate().alpha(0f).translationX(-dir * dp(22f)).setDuration(110)
+        panel.animate().cancel()
+        panel.animate().alpha(0f).translationX(-dir * dp(20f)).setDuration(110)
             .setInterpolator(DecelerateInterpolator()).withEndAction {
                 bind()
-                content.translationX = dir * dp(22f)
-                content.animate().alpha(1f).translationX(0f).setDuration(520)
+                panel.translationX = dir * dp(20f)
+                panel.animate().alpha(1f).translationX(0f).setDuration(520)
                     .setInterpolator(SpringInterpolator(15f, 0.75f, 0.9f)).start()
             }.start()
     }
 
     private fun bind() {
-        count.text = if (allDone) "Done" else "${index + 1} / $n"
         if (allDone) {
+            eyebrow.text = "ALL DONE"
+            panel.mark = "✓"
             heading.text = "You're all set"
             bodyTv.text = "Shortstop is on and will keep running. Start a focus session whenever you're ready."
             actionBtn.visibility = View.GONE
+            panel.invalidate()
             refreshState()
             return
         }
         val s = steps[index]
+        eyebrow.text = "STEP ${index + 1} OF $n"
+        panel.mark = "${index + 1}"
         heading.text = s.title
         bodyTv.text = s.body
         actionBtn.visibility = View.VISIBLE
+        panel.invalidate()
         refreshState()
     }
 
     private fun refreshState() {
-        count.text = if (allDone) "Done" else "${index + 1} / $n"
-        val s = steps[index]
+        val tally = done.count { it }
+        count.text = if (allDone) "Done" else "$tally of $n done"
+        val last = index == n - 1
+        val enabled = allDone || (if (last) done[index] else (steps[index].manual || done[index]))
         if (!allDone) {
+            val s = steps[index]
             if (done[index] && !s.manual) {
                 actionBtn.text = "✓  Done"
-                actionBtn.setTextColor(pal.muted)
-                actionBtn.background = pillBg(Color.TRANSPARENT, pal.border, dp(1f))
+                actionBtn.quiet(true)
                 actionBtn.isClickable = false
                 actionBtn.setOnClickListener(null)
             } else {
                 actionBtn.text = s.action
-                actionBtn.setTextColor(pal.ink)
-                actionBtn.background = pillBg(pal.canvas, pal.border, dp(1f))
+                if (enabled) actionBtn.quiet() else actionBtn.primary()
                 actionBtn.isClickable = true
                 actionBtn.setOnClickListener { s.open() }
             }
         }
-        val last = index == n - 1
         next.text = if (allDone) "Close" else if (last) "Finish" else "Continue  ›"
-        val enabled = allDone || (if (last) done[index] else (s.manual || done[index]))
-        next.animate().cancel()
-        next.animate().alpha(if (enabled) 1f else 0.38f).setDuration(160).start()
+        if (enabled) next.primary() else next.quiet(true)
         val canBack = index > 0 && !allDone
         back.animate().cancel()
         back.animate().alpha(if (canBack) 1f else 0f).setDuration(160).start()
@@ -291,22 +342,25 @@ class SetupStepper(
         var onSelect: (Int) -> Unit = {}
         private var pos = 0f
         private val chk = FloatArray(n)
-        private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = mixColor(pal.surface, pal.ink, 0.075f) }
-        private val pillP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.canvas }
-        private val shadowP = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val pillEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; color = pal.border; strokeWidth = d
+        private val xs = FloatArray(n)
+        private val ws = FloatArray(n)
+        private val trackP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 2f * d; strokeCap = Paint.Cap.ROUND; color = pal.border
         }
-        private val txt = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val fillLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 2f * d; strokeCap = Paint.Cap.ROUND; color = pal.ink
+        }
+        private val pillP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink }
+        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f * d }
+        private val lab = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = fonts.semi }
         private val num = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = fonts.semi }
-        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.4f * d }
-        private val fillC = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink }
         private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = 1.7f * d; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+            style = Paint.Style.STROKE; strokeWidth = 1.8f * d; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
         }
         private val r = RectF()
         private val p = Path()
         private val overshoot = OvershootInterpolator(2.2f)
+        private val itemH get() = 34f * d
 
         init { isClickable = true }
 
@@ -334,14 +388,33 @@ class SetupStepper(
         }
 
         override fun onMeasure(w: Int, h: Int) {
-            setMeasuredDimension(MeasureSpec.getSize(w), dp(46f))
+            setMeasuredDimension(MeasureSpec.getSize(w), dp(40f))
+        }
+
+        private fun layoutItems(w: Float) {
+            val h = itemH
+            lab.textSize = 13.5f * sd
+            var total = 0f
+            for (i in 0 until n) {
+                val act = (1f - Math.abs(pos - i)).coerceIn(0f, 1f)
+                ws[i] = h + act * (8f * d + lab.measureText(steps[i].tab) + 16f * d)
+                total += ws[i]
+            }
+            val gap = if (n > 1) ((w - total) / (n - 1)).coerceAtLeast(14f * d) else 0f
+            var x = 0f
+            for (i in 0 until n) { xs[i] = x; x += ws[i] + gap }
         }
 
         override fun onTouchEvent(e: MotionEvent): Boolean {
             if (e.actionMasked == MotionEvent.ACTION_UP) {
-                val pad = 4f * d
-                val iw = (width - 2 * pad) / n
-                onSelect(((e.x - pad) / iw).toInt().coerceIn(0, n - 1))
+                layoutItems(width.toFloat())
+                var best = 0
+                var bd = Float.MAX_VALUE
+                for (i in 0 until n) {
+                    val dist = if (e.x < xs[i]) xs[i] - e.x else if (e.x > xs[i] + ws[i]) e.x - xs[i] - ws[i] else 0f
+                    if (dist < bd) { bd = dist; best = i }
+                }
+                onSelect(best)
                 performClick()
             }
             return super.onTouchEvent(e)
@@ -349,58 +422,59 @@ class SetupStepper(
 
         override fun onDraw(c: Canvas) {
             val w = width.toFloat()
-            val h = height.toFloat()
-            r.set(0f, 0f, w, h)
-            c.drawRoundRect(r, h / 2f, h / 2f, bg)
-            val pad = 4f * d
-            val iw = (w - 2f * pad) / n
-            val left = pad + pos * iw
-            val ph = h - 2f * pad
-            // the raised pill that glides
-            for (k in 3 downTo 1) {
-                shadowP.color = Color.argb(if (pal.dark) 18 else 10, 0, 0, 0)
-                r.set(left - k * d * 0.6f, pad + k * d * 0.5f, left + iw + k * d * 0.6f, h - pad + k * d * 1.2f)
-                c.drawRoundRect(r, ph / 2f + k * d, ph / 2f + k * d, shadowP)
+            val h = itemH
+            val top = (height - h) / 2f
+            val cy = height / 2f
+            layoutItems(w)
+
+            // lines between the steps, filling as you move on
+            for (i in 0 until n - 1) {
+                val a = xs[i] + ws[i] + 6f * d
+                val b = xs[i + 1] - 6f * d
+                if (b <= a) continue
+                c.drawLine(a, cy, b, cy, trackP)
+                val f = Math.max((pos - i).coerceIn(0f, 1f), chk[i])
+                if (f > 0.01f) c.drawLine(a, cy, a + (b - a) * f, cy, fillLine)
             }
-            r.set(left, pad, left + iw, h - pad)
-            c.drawRoundRect(r, ph / 2f, ph / 2f, pillP)
-            r.inset(d * 0.5f, d * 0.5f)
-            c.drawRoundRect(r, ph / 2f, ph / 2f, pillEdge)
 
             for (i in 0 until n) {
-                val cx = pad + i * iw + iw / 2f
                 val act = (1f - Math.abs(pos - i)).coerceIn(0f, 1f)
-                txt.typeface = if (act > 0.5f) fonts.semi else fonts.medium
-                txt.textSize = 12.5f * sd
-                txt.color = mixColor(pal.muted, pal.ink, act)
-                val label = steps[i].tab
-                val lw = txt.measureText(label)
-                val circ = 18f * d
-                val gap = 6f * d
-                val sx = cx - (circ + gap + lw) / 2f
-                val ccx = sx + circ / 2f
-                val ccy = h / 2f
-                val t = chk[i]
+                val t = chk[i].coerceIn(0f, 1f)
+                val ccx = xs[i] + h / 2f
+                // the black pill of the current step
+                if (act > 0.01f) {
+                    pillP.alpha = (255 * act).toInt()
+                    r.set(xs[i], top, xs[i] + ws[i], top + h)
+                    c.drawRoundRect(r, h / 2f, h / 2f, pillP)
+                }
+                // outline: muted while waiting, ink once done, hidden inside the pill
+                ring.color = mixColor(pal.border, pal.ink, Math.max(t, 0.0f))
+                if (t < 0.01f) ring.color = mixColor(pal.muted, pal.border, 0.4f)
+                ring.alpha = (255 * (1f - act)).toInt()
+                if (ring.alpha > 0) c.drawCircle(ccx, cy, h / 2f - 0.75f * d, ring)
+
+                val onInk = mixColor(pal.ink, pal.canvas, act)
                 if (t > 0.01f) {
-                    val sc = overshoot.getInterpolation(t.coerceIn(0f, 1f))
-                    fillC.color = mixColor(pal.muted, pal.ink, 1f)
-                    c.drawCircle(ccx, ccy, circ / 2f * sc, fillC)
-                    tick.color = pal.canvas
-                    tick.alpha = (255 * t.coerceIn(0f, 1f)).toInt()
-                    val u = circ / 18f * sc
+                    val sc = overshoot.getInterpolation(t)
+                    tick.color = onInk
+                    tick.alpha = (255 * t).toInt()
+                    val u = (h / 34f) * sc
                     p.reset()
-                    p.moveTo(ccx - 4f * u, ccy + 0.3f * u)
-                    p.lineTo(ccx - 1.2f * u, ccy + 3f * u)
-                    p.lineTo(ccx + 4.2f * u, ccy - 3f * u)
+                    p.moveTo(ccx - 5f * d * u, cy + 0.4f * d * u)
+                    p.lineTo(ccx - 1.5f * d * u, cy + 3.6f * d * u)
+                    p.lineTo(ccx + 5.2f * d * u, cy - 3.6f * d * u)
                     c.drawPath(p, tick)
                 } else {
-                    ring.color = mixColor(pal.muted, pal.ink, act)
-                    c.drawCircle(ccx, ccy, circ / 2f - 0.7f * d, ring)
-                    num.color = ring.color
-                    num.textSize = 10.5f * sd
-                    c.drawText((i + 1).toString(), ccx, ccy - (num.ascent() + num.descent()) / 2f, num)
+                    num.color = mixColor(pal.muted, pal.canvas, act)
+                    num.textSize = 12.5f * sd
+                    c.drawText((i + 1).toString(), ccx, cy - (num.ascent() + num.descent()) / 2f, num)
                 }
-                c.drawText(label, sx + circ + gap, ccy - (txt.ascent() + txt.descent()) / 2f, txt)
+                if (act > 0.35f) {
+                    val la = ((act - 0.35f) / 0.65f)
+                    lab.color = pal.canvas
+                    lab.alpha = (255 * la * la).toInt()
+                    c.drawText(steps[i].tab, xs[i] + h + 2f * d, cy - (lab.ascent() + lab.descent()) / 2f, lab)
+                }
             }
         }
     }

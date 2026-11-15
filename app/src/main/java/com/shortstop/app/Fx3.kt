@@ -765,6 +765,8 @@ class CallChip(ctx: Context, private val pal: Palette, private val fonts: Fonts)
     }
     private val rect = RectF()
     private val clip = Path()
+    // the Atom logo from react-bits Shape Blur, in a 26dp frame (the logo itself is 0.6 of it, 16dp like the old glyph)
+    private val logo = ShapeBlurLogo(ctx, 26f, pal.dark, pal.ink)
 
     fun set(name: String, arg: String, timer: String?, progress: Float, state: Int) {
         val prev = this.state
@@ -836,11 +838,7 @@ class CallChip(ctx: Context, private val pal: Palette, private val fonts: Fonts)
                 c.drawLine(ix + 1f, cy - s, ix + s * 2.6f, cy + s, icon)
                 c.drawLine(ix + s * 2.6f, cy - s, ix + 1f, cy + s, icon)
             }
-            else -> {
-                c.drawLine(ix + 1f, cy - s, ix + s * 1.6f, cy, icon)
-                c.drawLine(ix + s * 1.6f, cy, ix + 1f, cy + s, icon)
-                c.drawLine(ix + s * 1.9f, cy + s, ix + s * 3.2f, cy + s, icon)
-            }
+            else -> logo.draw(c, ix + context.dp3(8f), cy)
         }
         nameP.textSize = context.dp3(13f)
         argP.textSize = context.dp3(13f)
@@ -862,6 +860,12 @@ class CallChip(ctx: Context, private val pal: Palette, private val fonts: Fonts)
                 x += cw
             }
         }
+        if (logo.animated && state != DONE && state != ERROR && isShown) postInvalidateOnAnimation()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        logo.reset()
     }
 
     override fun onDetachedFromWindow() {

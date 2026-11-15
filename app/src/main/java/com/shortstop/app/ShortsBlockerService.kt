@@ -25,6 +25,7 @@ class ShortsBlockerService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var tracking: String? = null
     private var lastBlock = 0L
+    private var lastCoverCheck = 0L
     private var lastUrlCheck = 0L
     private var lastSkip = 0L
     private var strikes = 0
@@ -127,11 +128,18 @@ class ShortsBlockerService : AccessibilityService() {
         }
 
         // 1c. Block the home screen: cover the launcher with the focus timer
-        if (hardNow && Store.blockHome(this) && pkg == launcherPkg &&
-            event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-        ) {
-            showCover(pkg)
-            return
+        // Not only when the launcher window opens: it also covers coming back from the shade, recents or a popup,
+        // where the launcher never fires a "window opened" event. Content events are only trusted when the
+        // launcher really is the screen in front, so the cover never lands on top of Shortstop or another app.
+        if (hardNow && Store.blockHome(this) && pkg == launcherPkg) {
+            val opened = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            if (opened || now - lastCoverCheck > 250) {
+                lastCoverCheck = now
+                if (opened || rootInActiveWindow?.packageName?.toString() == launcherPkg) {
+                    showCover(pkg)
+                    return
+                }
+            }
         }
 
         // 2. Any app the person picked (always-on list, or the focus list during focus)

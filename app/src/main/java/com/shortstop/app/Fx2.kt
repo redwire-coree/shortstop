@@ -1092,11 +1092,6 @@ class SilkView(ctx: Context, private val canvasColor: Int, private val dark: Boo
             )
             c.drawRect(0f, 0f, w, h, spot)
         }
-        val ru = (now - rt0) / 1000f
-        if (rt0 != 0L && ru < 1f) {
-            ripple.color = withAlpha(if (dark) sheen else pal(shade), 0.35f * (1f - ru))
-            c.drawCircle(rx, ry, context.dpf(260f) * ru, ripple)
-        }
         c.drawRect(0f, 0f, w, h, grain)
         postInvalidateDelayed(33)
     }
