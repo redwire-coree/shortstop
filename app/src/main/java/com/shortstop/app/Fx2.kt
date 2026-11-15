@@ -25,6 +25,7 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
@@ -204,7 +205,12 @@ class HoldPill(
 
 // ------------------------------------------------------------------ Slide to confirm
 
-/** Slide the handle across to confirm. While the action runs it spins, then unfurls into a done pill. */
+/**
+ * Slide the handle across to confirm. A light sweeps across the label and the handle gives a small nudge while it
+ * waits; once you drag, the handle lifts and follows your finger with a little easing, ticks as it passes each
+ * quarter, and turns into a check when it is far enough to let go. While the action runs it spins, then unfurls
+ * into a done pill.
+ */
 class SlideCommit(
     ctx: Context,
     private val pal: Palette,
@@ -215,17 +221,26 @@ class SlideCommit(
     private val onDone: () -> Unit
 ) : View(ctx) {
     private var pos = 0f
+    private var tpos = 0f
     private var drag = false
+    private var lift = 0f
+    private var armed = false
+    private var armT = 0f
+    private var tickBucket = 0
     private var phase = 0
     private var doneT = 0f
     private var spin = 0f
     private var anim: ValueAnimator? = null
     private var spinAnim: ValueAnimator? = null
     private val trackP = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val wipeP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = mixColor(pal.surface, pal.ink, 0.12f) }
+    private val wipeP = Paint(Paint.ANTI_ALIAS_FLAG)
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = pal.border; style = Paint.Style.STROKE; strokeWidth = ctx.dpf(1f)
     }
+    private val goal = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = pal.ink; style = Paint.Style.STROKE; strokeWidth = ctx.dpf(1.5f)
+    }
+    private val shadow = Paint(Paint.ANTI_ALIAS_FLAG)
     private val handleP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink }
     private val icon = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = pal.canvas; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND
@@ -236,6 +251,8 @@ class SlideCommit(
     private val er = RectF()
     private val clip = Path()
     private val arc = RectF()
+    private var shim: LinearGradient? = null
+    private val shimM = android.graphics.Matrix()
 
     private val hd get() = context.dpf(48f)
     private val pad get() = context.dpf(4f)
@@ -252,7 +269,18 @@ class SlideCommit(
         val w = width.toFloat()
         val h = height.toFloat()
         val r = h / 2f
-        val hx = pad + pos * run()
+        val now = SystemClock.uptimeMillis()
+        if (drag) pos += (tpos - pos) * 0.5f
+        lift += ((if (drag) 1f else 0f) - lift) * 0.25f
+        val armTarget = if (armed) 1f else 0f
+        armT += (armTarget - armT) * 0.3f
+        // a small nudge every few seconds while it waits
+        var nudge = 0f
+        if (phase == 0 && !drag && pos < 0.01f) {
+            val t = (now % 3200L) / 3200f
+            if (t < 0.2f) nudge = Math.sin(t / 0.2f * Math.PI).toFloat() * context.dpf(6f)
+        }
+        val hx = pad + pos * run() + nudge
         val cxh = hx + hd / 2f
         rect.set(0f, 0f, w, h)
         trackP.color = mixColor(pal.surface, pal.ink, doneT)
@@ -261,14 +289,33 @@ class SlideCommit(
         clip.addRoundRect(rect, r, r, Path.Direction.CW)
         c.save()
         c.clipPath(clip)
-        if (phase < 2 && pos > 0f) c.drawRect(0f, 0f, cxh, h, wipeP)
+        if (phase < 2 && pos > 0f) {
+            wipeP.color = mixColor(pal.surface, pal.ink, 0.06f + 0.12f * pos.coerceIn(0f, 1f))
+            c.drawRect(0f, 0f, cxh, h, wipeP)
+        }
         txt.textSize = context.dpf(15f)
         val cy = h / 2f - (txt.ascent() + txt.descent()) / 2f
         val fade = (1f - doneT) * (1f - minOf(1f, pos * 1.6f))
         if (fade > 0.01f) {
-            txt.color = pal.muted
+            val lx = w / 2f + hd / 4f
+            if (shim == null) {
+                shim = LinearGradient(
+                    0f, 0f, context.dpf(110f), 0f, intArrayOf(pal.muted, pal.ink, pal.muted),
+                    floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+                )
+            }
+            val tw = txt.measureText(label)
+            val st = ((now % 2800L) / 2800f)
+            val k = (st / 0.75f).coerceIn(0f, 1f)
+            val e = k * k * (3f - 2f * k)
+            val from = lx - tw / 2f - context.dpf(110f)
+            val to = lx + tw / 2f
+            shimM.setTranslate(from + (to - from) * e, 0f)
+            shim!!.setLocalMatrix(shimM)
+            txt.shader = shim
             txt.alpha = (255 * fade).toInt()
-            c.drawText(label, w / 2f + hd / 4f, cy, txt)
+            c.drawText(label, lx, cy, txt)
+            txt.shader = null
         }
         if (doneT > 0.01f) {
             txt.color = pal.canvas
@@ -282,6 +329,11 @@ class SlideCommit(
             c.drawLine(ix - s * 0.3f, h / 2f + s * 0.7f, ix + s, h / 2f - s * 0.7f, icon)
             icon.alpha = 255
         }
+        // the landing spot at the far end: it lights up once you are far enough to let go
+        if (doneT < 0.5f) {
+            goal.alpha = ((40 + 150 * armT) * (1f - doneT * 2f)).toInt().coerceIn(0, 255)
+            c.drawCircle(w - pad - hd / 2f, h / 2f, hd / 2f - context.dpf(5f) - 3f * armT * context.dpf(1f), goal)
+        }
         c.restore()
         if (doneT < 1f) {
             edge.alpha = (255 * (1f - doneT)).toInt()
@@ -291,8 +343,13 @@ class SlideCommit(
         }
         val hs = 1f - doneT
         if (hs > 0.01f) {
+            val sc = hs * (1f + 0.06f * lift + 0.05f * armT)
             c.save()
-            c.scale(hs, hs, cxh, h / 2f)
+            c.scale(sc, sc, cxh, h / 2f)
+            if (lift > 0.02f) {
+                shadow.color = Color.argb((60 * lift).toInt(), 0, 0, 0)
+                c.drawCircle(cxh, h / 2f + context.dpf(2.5f), hd / 2f + context.dpf(1.5f), shadow)
+            }
             c.drawCircle(cxh, h / 2f, hd / 2f, handleP)
             if (phase == 1) {
                 val ar = hd * 0.2f
@@ -300,29 +357,43 @@ class SlideCommit(
                 c.drawArc(arc, spin, 250f, false, icon)
             } else {
                 val s = context.dpf(6f)
-                c.drawLine(cxh - s, h / 2f, cxh + s, h / 2f, icon)
-                c.drawLine(cxh + s * 0.2f, h / 2f - s * 0.8f, cxh + s, h / 2f, icon)
-                c.drawLine(cxh + s * 0.2f, h / 2f + s * 0.8f, cxh + s, h / 2f, icon)
+                icon.alpha = (255 * (1f - armT)).toInt()
+                if (icon.alpha > 0) {
+                    c.drawLine(cxh - s, h / 2f, cxh + s, h / 2f, icon)
+                    c.drawLine(cxh + s * 0.2f, h / 2f - s * 0.8f, cxh + s, h / 2f, icon)
+                    c.drawLine(cxh + s * 0.2f, h / 2f + s * 0.8f, cxh + s, h / 2f, icon)
+                }
+                icon.alpha = (255 * armT).toInt()
+                if (icon.alpha > 0) {
+                    c.drawLine(cxh - s * 0.9f, h / 2f, cxh - s * 0.2f, h / 2f + s * 0.75f, icon)
+                    c.drawLine(cxh - s * 0.2f, h / 2f + s * 0.75f, cxh + s * 0.95f, h / 2f - s * 0.75f, icon)
+                }
+                icon.alpha = 255
             }
             c.restore()
         }
+        if (phase == 0 && isShown) postInvalidateOnAnimation()
     }
 
     private fun springBack() {
         anim?.cancel()
-        anim = ValueAnimator.ofFloat(pos, 0f).apply {
-            duration = 520
-            interpolator = OvershootInterpolator(1.2f)
-            addUpdateListener { pos = it.animatedValue as Float; invalidate() }
+        armed = false
+        val from = pos
+        anim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 620
+            interpolator = SpringInterpolator(13f, 0.62f, 0.8f)
+            addUpdateListener { pos = (from * (1f - it.animatedValue as Float)).coerceAtLeast(-0.02f); tpos = pos; invalidate() }
             start()
         }
     }
 
     private fun commit() {
         anim?.cancel()
-        anim = ValueAnimator.ofFloat(pos, 1f).apply {
-            duration = 120
-            addUpdateListener { pos = it.animatedValue as Float; invalidate() }
+        val from = pos
+        anim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 140
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { pos = from + (1f - from) * it.animatedValue as Float; tpos = pos; invalidate() }
             onFinish { land() }
             start()
         }
@@ -330,6 +401,7 @@ class SlideCommit(
 
     private fun land() {
         pos = 1f
+        tpos = 1f
         invalidate()
         animate().scaleY(0.974f).setDuration(70).withEndAction { animate().scaleY(1f).setDuration(140).start() }.start()
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -359,22 +431,36 @@ class SlideCommit(
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val hx = pad + pos * run()
-                if (e.x >= hx - context.dpf(10f) && e.x <= hx + hd + context.dpf(10f)) {
+                if (e.x >= hx - context.dpf(16f) && e.x <= hx + hd + context.dpf(16f)) {
                     drag = true
                     anim?.cancel()
                     parent?.requestDisallowInterceptTouchEvent(true)
                     performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    tickBucket = 0
+                    invalidate()
                     return true
                 }
                 return false
             }
             MotionEvent.ACTION_MOVE -> if (drag) {
-                pos = ((e.x - pad - hd / 2f) / run()).coerceIn(0f, 1f)
+                tpos = ((e.x - pad - hd / 2f) / run()).coerceIn(0f, 1f)
+                val b = (tpos * 4f).toInt().coerceAtMost(3)
+                if (b != tickBucket) {
+                    tickBucket = b
+                    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                }
+                val nowArmed = tpos >= 0.9f
+                if (nowArmed != armed) {
+                    armed = nowArmed
+                    if (armed) performHapticFeedback(
+                        if (android.os.Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
+                    )
+                }
                 invalidate()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (drag) {
                 drag = false
-                if (e.actionMasked == MotionEvent.ACTION_UP && pos >= 0.9f) commit() else springBack()
+                if (e.actionMasked == MotionEvent.ACTION_UP && tpos >= 0.9f) commit() else springBack()
             }
         }
         return true

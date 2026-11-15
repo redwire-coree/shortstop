@@ -74,6 +74,11 @@ class MainActivity : Activity() {
     private var statusChip: CallChip? = null
     private var setupCard: View? = null
     private var runExtras: View? = null
+    private var schedTitle: TextView? = null
+    private var schedSub: TextView? = null
+    private var schedDot: LiveDot? = null
+    private var schedTimeline: WeekTimeline? = null
+    private var lastSchedActive: String? = null
     private var exToday: TextView? = null
     private var exStreak: TextView? = null
     private var exBlocked: TextView? = null
@@ -859,6 +864,11 @@ class MainActivity : Activity() {
             setupChecks[1].setChecked(on, true)
             setupChecks[2].setChecked(batt, true)
         }
+        val aid = Store.scheduleActive(this)?.id
+        if (aid != lastSchedActive) {
+            lastSchedActive = aid
+            if (schedCol != null) fillSchedules()
+        } else updateSchedHeader()
         val running = Store.focusRunning(this)
         val chip = statusChip
         if (chip != null) {
@@ -1474,9 +1484,26 @@ class MainActivity : Activity() {
         col.addView(display("Schedule", 30f))
         col.addView(tv("Focus starts by itself in these windows. Your focus apps are closed until they end.",
             14f, fonts.regular, pal.muted).apply { setPadding(0, dp(8), 0, dp(6)) })
+
+        val head = card().apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(16), dp(20), dp(16))
+        }
+        val dot = LiveDot(this, pal.ink)
+        schedDot = dot
+        head.addView(dot, lp(wrapC, wrapC).apply { marginEnd = dp(8) })
+        val hc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        schedTitle = tv("", 16f, fonts.semi, pal.ink)
+        schedSub = tv("", 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(4), 0, 0) }
+        hc.addView(schedTitle, lp(matchP, wrapC))
+        hc.addView(schedSub, lp(matchP, wrapC))
+        head.addView(hc, lp(0, wrapC, 1f))
+        col.addView(head, lp(matchP, wrapC).apply { topMargin = dp(14) })
+
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         schedCol = list
-        col.addView(list, lp(matchP, wrapC).apply { topMargin = dp(10) })
+        col.addView(list, lp(matchP, wrapC).apply { topMargin = dp(14) })
         page.addView(scrollPage(col), lp(matchP, 0, 1f))
         val barWrap = LinearLayout(this).apply { setPadding(dp(20), dp(10), dp(20), dp(14)) }
         barWrap.addView(pill("Create schedule", true) { showScheduleSheet(null) }, lp(matchP, wrapC))
@@ -1485,36 +1512,161 @@ class MainActivity : Activity() {
         return page
     }
 
+    /** The next window that will start, as (schedule, minutes from now). */
+    private fun nextSchedule(): Pair<Store.FocusSchedule, Int>? {
+        val items = Store.schedules(this).filter { it.on }
+        if (items.isEmpty()) return null
+        val now = Calendar.getInstance()
+        val nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+        val today = (now.get(Calendar.DAY_OF_WEEK) + 5) % 7
+        var best: Pair<Store.FocusSchedule, Int>? = null
+        for (off in 0..7) {
+            val di = (today + off) % 7
+            for (s in items) {
+                if (((s.days shr di) and 1) == 0) continue
+                if (off == 0 && s.start <= nowMin) continue
+                val mins = off * 1440 + s.start - nowMin
+                if (best == null || mins < best.second) best = s to mins
+            }
+        }
+        return best
+    }
+
+    private fun updateSchedHeader() {
+        val t = schedTitle ?: return
+        val sub = schedSub ?: return
+        val active = Store.scheduleActive(this)
+        val title: String
+        val line: String
+        if (active != null) {
+            title = "Focus is on"
+            line = "${active.name} until ${fmt12(active.end)}"
+        } else {
+            val next = nextSchedule()
+            if (next != null) {
+                val (s, mins) = next
+                title = "Next up"
+                val now = Calendar.getInstance()
+                val nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+                line = if (mins < 60) "${s.name} · in $mins min"
+                else if (mins < 1440) "${s.name} · in ${mins / 60}h ${mins % 60}m"
+                else {
+                    val names = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+                    val di = ((now.get(Calendar.DAY_OF_WEEK) + 5) % 7 + (nowMin + mins) / 1440) % 7
+                    "${s.name} · ${names[di]} ${fmt12(s.start)}"
+                }
+            } else {
+                title = "Nothing scheduled"
+                line = "Add a window and Shortstop starts focus for you."
+            }
+        }
+        if (t.text.toString() != title) t.text = title
+        if (sub.text.toString() != line) sub.text = line
+        schedDot?.let { if (it.live != (active != null)) it.live = active != null }
+    }
+
     private fun fillSchedules() {
         val list = schedCol ?: return
         list.removeAllViews()
+        schedTimeline = null
+        updateSchedHeader()
         val items = Store.schedules(this)
         if (items.isEmpty()) {
-            list.addView(display("Create your study schedule", 26f).apply { setPadding(0, dp(40), 0, dp(8)) })
+            list.addView(display("Create your study schedule", 26f).apply { setPadding(0, dp(24), 0, dp(8)) })
             list.addView(tv("Pick the hours you want to stay focused. Shortstop does the rest.", 15f, fonts.regular, pal.muted))
+            list.addView(groupLabel("Quick start").apply { setPadding(dp(4), dp(22), 0, dp(8)) })
+            val templates = listOf(
+                Triple("Morning Study", 6 * 60, 8 * 60),
+                Triple("Evening Study", 18 * 60, 20 * 60),
+                Triple("Night", 22 * 60, 6 * 60)
+            )
+            templates.forEachIndexed { i, (n, st, en) ->
+                val days = if (n == "Night") 127 else 31
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    background = round(pal.surface, 24, pal.border, dp(1))
+                    setPadding(dp(20), dp(16), dp(16), dp(18))
+                    isClickable = true
+                    setOnClickListener {
+                        Store.saveSchedules(this@MainActivity, Store.schedules(this@MainActivity) +
+                            Store.FocusSchedule(System.currentTimeMillis().toString() + i, n, st, en, days, true))
+                        fillSchedules()
+                        refreshStatus()
+                        toast("$n added")
+                    }
+                    press(this)
+                }
+                val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                val lc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                lc.addView(tv(n, 17f, fonts.semi, pal.ink))
+                lc.addView(tv("${fmt12(st)} – ${fmt12(en)} · ${daysLabel(days)}", 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(4), 0, 0) })
+                top.addView(lc, lp(0, wrapC, 1f))
+                top.addView(tv("Add", 14f, fonts.semi, pal.ink).apply {
+                    setPadding(dp(16), dp(8), dp(16), dp(8))
+                    background = round(pal.canvas, 40, pal.border, dp(1))
+                })
+                row.addView(top, lp(matchP, wrapC))
+                row.addView(DayBar(this, pal, fonts, false).apply { set(st, en, true, false) }, lp(matchP, wrapC).apply { topMargin = dp(14) })
+                list.addView(row, lp(matchP, wrapC).apply { bottomMargin = dp(10) })
+            }
             return
         }
+        val tl = card().apply { setPadding(dp(16), dp(16), dp(16), dp(12)) }
+        tl.addView(tv("This week", 15f, fonts.semi, pal.ink).apply { setPadding(dp(4), 0, 0, dp(12)) }, lp(matchP, wrapC))
+        val wt = WeekTimeline(this, pal, fonts, items)
+        schedTimeline = wt
+        tl.addView(wt, lp(matchP, wrapC))
+        list.addView(tl, lp(matchP, wrapC).apply { bottomMargin = dp(14) })
+
+        val activeId = Store.scheduleActive(this)?.id
+        val letters = "MTWTFSS"
         for (s in items) {
+            val live = s.id == activeId
             val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                background = round(pal.surface, 24, pal.border, dp(1))
-                setPadding(dp(20), dp(16), dp(16), dp(16))
+                orientation = LinearLayout.VERTICAL
+                background = round(pal.surface, 24, if (live) pal.ink else pal.border, dp(1))
+                setPadding(dp(20), dp(18), dp(16), dp(18))
                 isClickable = true
+                alpha = if (s.on) 1f else 0.62f
                 setOnClickListener { showScheduleSheet(s) }
+                press(this)
             }
-            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            col.addView(tv(s.name, 17f, fonts.semi, pal.ink))
-            col.addView(tv("${fmt12(s.start)} – ${fmt12(s.end)}", 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(4), 0, 0) })
-            col.addView(tv(daysLabel(s.days), 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(2), 0, 0) })
-            row.addView(col, lp(0, wrapC, 1f).apply { marginEnd = dp(12) })
+            val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val nameRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            nameRow.addView(tv(s.name, 17f, fonts.semi, pal.ink))
+            if (live) nameRow.addView(tv("LIVE", 10f, fonts.bold, pal.canvas, Gravity.CENTER).apply {
+                letterSpacing = 0.1f
+                background = round(pal.ink, 40)
+                setPadding(dp(8), dp(4), dp(8), dp(4))
+            }, lp(wrapC, wrapC).apply { marginStart = dp(8) })
+            left.addView(nameRow)
+            val mins = (s.end - s.start + 1440) % 1440
+            val dur = if (mins % 60 == 0) "${mins / 60}h" else if (mins < 60) "$mins min" else "${mins / 60}h ${mins % 60}m"
+            left.addView(tv("${fmt12(s.start)} – ${fmt12(s.end)} · $dur", 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(4), 0, 0) })
+            top.addView(left, lp(0, wrapC, 1f).apply { marginEnd = dp(12) })
+            val bar = DayBar(this, pal, fonts, false)
             val t = ToggleView(this)
             t.setOn(s.on, false)
             t.listener = { on ->
                 Store.saveSchedules(this, Store.schedules(this).map { if (it.id == s.id) it.copy(on = on) else it })
+                row.animate().alpha(if (on) 1f else 0.62f).setDuration(220).start()
+                bar.set(s.start, s.end, on, true)
+                schedTimeline?.let { it.items = Store.schedules(this); it.invalidate() }
                 refreshStatus()
             }
-            row.addView(t)
+            top.addView(t)
+            row.addView(top, lp(matchP, wrapC))
+            bar.set(s.start, s.end, s.on, false)
+            row.addView(bar, lp(matchP, wrapC).apply { topMargin = dp(14) })
+            val days = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (i in 0..6) {
+                val onDay = ((s.days shr i) and 1) == 1
+                days.addView(tv(letters[i].toString(), 11f, fonts.semi, if (onDay) pal.canvas else pal.muted, Gravity.CENTER).apply {
+                    background = if (onDay) round(pal.ink, 40) else round(Color.TRANSPARENT, 40, pal.border, dp(1))
+                }, lp(dp(26), dp(26)).apply { if (i < 6) marginEnd = dp(6) })
+            }
+            row.addView(days, lp(wrapC, wrapC).apply { topMargin = dp(12) })
             list.addView(row, lp(matchP, wrapC).apply { bottomMargin = dp(10) })
         }
     }
@@ -1530,6 +1682,7 @@ class MainActivity : Activity() {
         val nameInput = input("Name")
         nameInput.setText(name)
         watch(nameInput) { name = it }
+        val preview = DayBar(this, pal, fonts, true).apply { set(start, end, true, false) }
         val startBtn = pill(fmt12(start), false) {}
         val endBtn = pill(fmt12(end), false) {}
         val dayChips = ArrayList<TextView>()
@@ -1539,6 +1692,7 @@ class MainActivity : Activity() {
             nameInput.setText(n)
             startBtn.text = fmt12(s)
             endBtn.text = fmt12(e)
+            preview.set(s, e, true, true)
             paintDays()
         }
 
@@ -1564,12 +1718,13 @@ class MainActivity : Activity() {
 
         box.addView(groupLabel("Time").apply { setPadding(dp(4), dp(14), 0, dp(6)) })
         val times = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        startBtn.setOnClickListener { pickTime(start) { m -> start = m; startBtn.text = fmt12(m) } }
-        endBtn.setOnClickListener { pickTime(end) { m -> end = m; endBtn.text = fmt12(m) } }
+        startBtn.setOnClickListener { pickTime(start) { m -> start = m; startBtn.text = fmt12(m); preview.set(start, end, true, true) } }
+        endBtn.setOnClickListener { pickTime(end) { m -> end = m; endBtn.text = fmt12(m); preview.set(start, end, true, true) } }
         times.addView(startBtn, lp(0, wrapC, 1f))
         times.addView(tv("to", 14f, fonts.regular, pal.muted).apply { setPadding(dp(12), 0, dp(12), 0) })
         times.addView(endBtn, lp(0, wrapC, 1f))
         box.addView(times)
+        box.addView(preview, lp(matchP, wrapC).apply { topMargin = dp(14) })
 
         box.addView(groupLabel("Active days").apply { setPadding(dp(4), dp(14), 0, dp(6)) })
         val dayLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
