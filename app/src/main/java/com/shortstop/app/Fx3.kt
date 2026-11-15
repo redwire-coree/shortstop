@@ -123,22 +123,37 @@ class GooeyNav(
     private val dty = FloatArray(maxDrops)
 
     override fun onMeasure(w: Int, h: Int) {
-        setMeasuredDimension(MeasureSpec.getSize(w), (48f * d).toInt())
+        setMeasuredDimension(MeasureSpec.getSize(w), (52f * d).toInt())
     }
 
     private fun clamp01(v: Float) = if (v < 0f) 0f else if (v > 1f) 1f else v
 
+    private var labelPx = 0f
+
+    /** Each tab is as wide as its label plus an even share of the spare room, so labels never touch or crowd. */
     private fun layoutRects() {
         rects.clear()
         val n = labels.size
         val pad = 6f * d
-        val gap = 4f * d
-        val itemW = (width - 2 * pad - gap * (n - 1)) / n
+        val gap = 2f * d
+        val avail = width - 2 * pad - gap * (n - 1)
+        var size = 12.5f * resources.displayMetrics.scaledDensity
+        txt.textSize = size
+        val minPad = 16f * d
+        while (size > 9f * d && labels.sumOf { txt.measureText(it).toDouble() } + n * minPad > avail) {
+            size -= 0.5f * d
+            txt.textSize = size
+        }
+        labelPx = size
+        val tw = labels.map { txt.measureText(it) }
+        val slack = (avail - tw.sum()) / n
         val top = pad
         val itemH = height - 2 * pad
+        var x = pad
         for (i in 0 until n) {
-            val l = pad + i * (itemW + gap)
-            rects.add(RectF(l, top, l + itemW, top + itemH))
+            val w = tw[i] + maxOf(slack, minPad)
+            rects.add(RectF(x, top, x + w, top + itemH))
+            x += w + gap
         }
     }
 
@@ -333,7 +348,7 @@ class GooeyNav(
     }
 
     private fun drawLabels(c: Canvas, ink: Int, activeInk: Boolean) {
-        txt.textSize = 13f * resources.displayMetrics.scaledDensity
+        txt.textSize = labelPx
         val base = (height / 2f) - (txt.ascent() + txt.descent()) / 2f
         labels.forEachIndexed { i, l ->
             val r = rects[i]
@@ -368,7 +383,7 @@ class GooeyNav(
             val rect = rects.getOrNull(index) ?: continue
             val amount = st.scale
             if (amount <= 0.002f || nb >= 8) continue
-            val hh2 = rect.height() * minOf(1.08f, 0.42f + 0.58f * Math.sqrt(maxOf(0f, amount).toDouble()).toFloat())
+            val hh2 = rect.height() * minOf(1f, 0.42f + 0.58f * Math.sqrt(maxOf(0f, amount).toDouble()).toFloat())
             val ww = maxOf(hh2, rect.width() * Math.pow(maxOf(0f, amount).toDouble(), 0.75).toFloat())
             bcx[nb] = rect.centerX(); bcy[nb] = rect.centerY(); bhw[nb] = ww / 2f; bhh[nb] = hh2 / 2f
             nb++
@@ -403,7 +418,6 @@ class GooeyNav(
     }
 
     private fun blob(c: Canvas, nb: Int, nd: Int, k: Float) {
-        val step = maxOf(1f, d * 0.75f)
         var minX = Float.MAX_VALUE
         var minY = Float.MAX_VALUE
         var maxX = -Float.MAX_VALUE
@@ -417,10 +431,12 @@ class GooeyNav(
             minX = minOf(minX, dx[i] - reach); maxX = maxOf(maxX, dx[i] + reach)
             minY = minOf(minY, dy[i] - reach); maxY = maxOf(maxY, dy[i] + reach)
         }
-        val m = k + step * 2f
+        val m = k + 4f * d
         minX = maxOf(minX - m, -60f * d); maxX = minOf(maxX + m, width + 60f * d)
         minY = maxOf(minY - m, -150f * d); maxY = minOf(maxY + m, height + 70f * d)
         if (maxX <= minX || maxY <= minY) return
+        // keep the per-frame work bounded: a big area samples coarser, the bilinear upscale keeps it soft
+        val step = maxOf(d * 0.75f, Math.sqrt(((maxX - minX) * (maxY - minY) / 9000f).toDouble()).toFloat())
         val cols = Math.ceil(((maxX - minX) / step).toDouble()).toInt().coerceAtLeast(1)
         val rows = Math.ceil(((maxY - minY) / step).toDouble()).toInt().coerceAtLeast(1)
         if (buf.size < cols * rows) buf = IntArray(cols * rows)
@@ -515,7 +531,7 @@ class GooeyNav(
 
 // ------------------------------------------------------------------ Pulse heart
 
-/** Like button: contracts to a dot, flips, pulses back, and the count rolls over. */
+/** Like button, react-bits Pulse Heart: contracts to a dot, flips colour, pulses back while the count rolls over. */
 class PulseHeart(
     ctx: Context,
     private val pal: Palette,
@@ -533,33 +549,36 @@ class PulseHeart(
     private var t = 1f
     private var anim: ValueAnimator? = null
     private val roll = RollPainter(this)
-    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.surface }
-    private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = pal.border; style = Paint.Style.STROKE; strokeWidth = ctx.dp3(1f)
-    }
-    private val fillP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink }
+    // exact react-bits values: liked #ff4d6d, idle #71717a, pill #f0f0f2, text #18181b
+    private val likedColor = Color.parseColor("#FF4D6D")
+    private val idleColor = Color.parseColor(if (pal.dark) "#A1A1AA" else "#71717A")
+    private val pillColor = Color.parseColor(if (pal.dark) "#26262B" else "#F0F0F2")
+    private val textColor = Color.parseColor(if (pal.dark) "#F4F4F5" else "#18181B")
+    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pillColor }
+    private val fillP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = likedColor }
     private val lineP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = pal.muted; style = Paint.Style.STROKE; strokeWidth = ctx.dp3(1.8f); strokeJoin = Paint.Join.ROUND
+        color = idleColor; style = Paint.Style.STROKE; strokeWidth = ctx.dp3(1.8f)
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
     }
-    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink; typeface = fonts.semi }
+    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = textColor; typeface = fonts.semi }
     private val heart = Path()
     private val rect = RectF()
 
+    private fun label() = java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(count)
+
     init {
-        roll.set(count.toString(), false)
+        roll.set(label(), false)
         isClickable = true
     }
 
     override fun onMeasure(w: Int, h: Int) {
         txt.textSize = context.dp3(14f)
-        val tw = if (showCount) txt.measureText("0000") * 0.75f else 0f
-        val wide = if (showCount) context.dp3(14f) + context.dp3(22f) + context.dp3(8f) + tw + context.dp3(14f) else context.dp3(40f)
+        val wide = if (showCount) context.dp3(15f) + context.dp3(22f) + context.dp3(8f) + txt.measureText(label()) + context.dp3(16f) else context.dp3(40f)
         setMeasuredDimension(wide.toInt(), context.dp3(40f).toInt())
     }
 
-    private fun heartPath(cx: Float, cy: Float, s: Float) {
+    private fun heartPath(cx: Float, cy: Float, w: Float) {
         heart.reset()
-        val w = s
         heart.moveTo(cx, cy + w * 0.42f)
         heart.cubicTo(cx - w * 0.62f, cy + w * 0.05f, cx - w * 0.52f, cy - w * 0.42f, cx - w * 0.2f, cy - w * 0.42f)
         heart.cubicTo(cx - w * 0.06f, cy - w * 0.42f, cx, cy - w * 0.3f, cx, cy - w * 0.2f)
@@ -573,29 +592,29 @@ class PulseHeart(
         val h = height.toFloat()
         rect.set(0f, 0f, w, h)
         c.drawRoundRect(rect, h / 2f, h / 2f, bg)
-        val i = context.dp3(0.5f)
-        rect.set(i, i, w - i, h - i)
-        c.drawRoundRect(rect, h / 2f, h / 2f, edge)
         val sc: Float = when {
             t >= 1f -> 1f
             t < 0.3f -> 1f - 0.7f * (t / 0.3f)
             else -> 0.3f + 0.7f * OvershootInterpolator(1.7f).getInterpolation((t - 0.3f) / 0.7f)
         }
-        val hx = if (showCount) context.dp3(14f) + context.dp3(11f) else w / 2f
+        val hx = if (showCount) context.dp3(15f) + context.dp3(11f) else w / 2f
         val size = context.dp3(22f) * sc
         heartPath(hx, h / 2f, size)
         if (shown) c.drawPath(heart, fillP) else c.drawPath(heart, lineP)
         if (showCount) {
             txt.textSize = context.dp3(14f)
             val base = h / 2f - (txt.ascent() + txt.descent()) / 2f
-            roll.draw(c, txt, hx + context.dp3(11f) + context.dp3(8f) + txt.measureText("0") * 1.5f, base)
+            val left = hx + context.dp3(11f) + context.dp3(8f)
+            roll.draw(c, txt, left + txt.measureText(label()) / 2f, base)
         }
     }
 
     override fun performClick(): Boolean {
+        val before = label().length
         liked = !liked
         count = maxOf(0, count + if (liked) 1 else -1)
-        roll.set(count.toString(), true)
+        roll.set(label(), true)
+        if (label().length != before) requestLayout()
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
         anim?.cancel()
         t = 0f
@@ -774,7 +793,7 @@ private class GlobeIcon(ctx: Context, color: Int) : View(ctx) {
     }
 }
 
-/** Input bar bent along an arc: the bar, text, caret and button all follow the curve (react-bits CurvedInput). */
+/** Input bar on a gentle arc. Drawn as a crisp vector outline; the field and button stay straight so typing is exact. */
 class CurvedBar(
     ctx: Context,
     private val pal: Palette,
@@ -784,17 +803,14 @@ class CurvedBar(
     private val onSubmit: (String) -> Unit
 ) : FrameLayout(ctx) {
     val edit: EditText
-    private val bend = ctx.dp3(12f)
+    private val bend = ctx.dp3(10f)
     private val barH = ctx.dp3(64f).toInt()
-    private var bmp: Bitmap? = null
-    private var bc: Canvas? = null
+    private val inset = ctx.dp3(1f)
     private val fillP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.canvas }
     private val edgeP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = pal.ink; style = Paint.Style.STROKE; strokeWidth = ctx.dp3(1.5f)
+        color = pal.ink; style = Paint.Style.STROKE; strokeWidth = ctx.dp3(1.5f); strokeJoin = Paint.Join.ROUND
     }
-    private val n = 24
-    private val verts = FloatArray((n + 1) * 4)
-    private val rect = RectF()
+    private val shape = Path()
 
     init {
         setWillNotDraw(false)
@@ -822,16 +838,36 @@ class CurvedBar(
             text = buttonLabel
             textSize = 14f
             typeface = fonts.semi
-            setTextColor(pal.canvas)
+            setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             includeFontPadding = false
-            background = android.graphics.drawable.GradientDrawable().apply { setColor(pal.ink); cornerRadius = dp(14).toFloat() }
-            setPadding(dp(18), 0, dp(18), 0)
+            // the one accent in the app: a violet-to-indigo gradient on the action
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.parseColor("#8B5CF6"), Color.parseColor("#5B5BF0"))
+            ).apply { cornerRadius = dp(14).toFloat() }
+            setPadding(dp(20), 0, dp(20), 0)
             isClickable = true
+            alpha = 0.55f
             setOnClickListener { onSubmit(edit.text.toString()) }
+            setOnTouchListener { v, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> v.animate().scaleX(0.95f).scaleY(0.95f).setDuration(80).start()
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                        v.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(SpringInterpolator(18f, 0.5f, 0.8f)).start()
+                }
+                false
+            }
         }
+        edit.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                btn.animate().alpha(if (s.isNullOrBlank()) 0.55f else 1f).setDuration(160).start()
+            }
+        })
         row.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
-        addView(row, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barH, Gravity.TOP))
+        addView(row, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barH, Gravity.TOP).apply { topMargin = (bend / 2f).toInt() + 1 })
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -840,51 +876,33 @@ class CurvedBar(
         super.onMeasure(w, MeasureSpec.makeMeasureSpec(barH + bend.toInt() + dp(2), MeasureSpec.EXACTLY))
     }
 
-    private fun off(x: Float): Float {
-        val u = (x / maxOf(1, width)) * 2f - 1f
-        return bend * u * u
+    private fun edgeY(x: Float, w: Float): Float {
+        val u = (x / w) * 2f - 1f
+        return inset + bend * u * u
     }
 
-    override fun dispatchDraw(c: Canvas) {
-        val w = width
-        if (w <= 0) return
-        var b = bmp
-        if (b == null || b.width != w) {
-            b?.recycle()
-            b = Bitmap.createBitmap(w, barH, Bitmap.Config.ARGB_8888)
-            bmp = b
-            bc = Canvas(b)
-        }
-        val cv = bc ?: return
-        b.eraseColor(Color.TRANSPARENT)
-        val e = edgeP.strokeWidth / 2f
-        rect.set(e, e, w - e, barH - e)
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat() - inset * 2f
+        if (w <= 0f) return
         val r = context.dp3(18f)
-        cv.drawRoundRect(rect, r, r, fillP)
-        cv.drawRoundRect(rect, r, r, edgeP)
-        super.dispatchDraw(cv)
-        for (i in 0..n) {
-            val x = w * i / n.toFloat()
-            val o = off(x)
-            verts[i * 2] = x
-            verts[i * 2 + 1] = o
-            verts[(n + 1) * 2 + i * 2] = x
-            verts[(n + 1) * 2 + i * 2 + 1] = barH + o
-        }
-        c.drawBitmapMesh(b, n, 1, verts, 0, null, 0, null)
-    }
-
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        val e = MotionEvent.obtain(ev)
-        e.offsetLocation(0f, -off(ev.x))
-        val r = super.dispatchTouchEvent(e)
-        e.recycle()
-        return r
-    }
-
-    override fun onDetachedFromWindow() {
-        bmp?.recycle()
-        bmp = null
-        super.onDetachedFromWindow()
+        val left = inset
+        val hgt = barH - inset * 2f
+        shape.reset()
+        fun top(x: Float) = edgeY(x - left, w) // x in view coordinates
+        shape.moveTo(left, top(left) + r)
+        shape.quadTo(left, top(left), left + r, top(left + r))
+        var x = left + r
+        while (x < left + w - r) { shape.lineTo(x, top(x)); x += context.dp3(4f) }
+        shape.lineTo(left + w - r, top(left + w - r))
+        shape.quadTo(left + w, top(left + w), left + w, top(left + w) + r)
+        shape.lineTo(left + w, top(left + w) + hgt - r)
+        shape.quadTo(left + w, top(left + w) + hgt, left + w - r, top(left + w - r) + hgt)
+        x = left + w - r
+        while (x > left + r) { shape.lineTo(x, top(x) + hgt); x -= context.dp3(4f) }
+        shape.lineTo(left + r, top(left + r) + hgt)
+        shape.quadTo(left, top(left) + hgt, left, top(left) + hgt - r)
+        shape.close()
+        c.drawPath(shape, fillP)
+        c.drawPath(shape, edgeP)
     }
 }

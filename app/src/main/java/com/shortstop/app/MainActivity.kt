@@ -74,7 +74,7 @@ class MainActivity : Activity() {
     private var statusChip: CallChip? = null
     private var setupCard: View? = null
     private var runningCard: View? = null
-    private var runRing: RingView? = null
+    private var runRing: TimerDial? = null
     private var runInfo: TextView? = null
     private var runBreakBtn: TextView? = null
     private var runEndBtn: FuseButton? = null
@@ -557,7 +557,7 @@ class MainActivity : Activity() {
 
         val nav = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setPadding(dp(12), dp(8), dp(12), dp(10))
             setBackgroundColor(pal.canvas)
             clipChildren = false
             clipToPadding = false
@@ -595,7 +595,7 @@ class MainActivity : Activity() {
         val dir = if (i > tabBefore) 1f else -1f
         nw.alpha = 0f
         nw.translationX = dir * dp(36)
-        nw.animate().alpha(1f).translationX(0f).setDuration(520).setInterpolator(SpringInterpolator(15f, 0.75f, 0.9f)).start()
+        nw.animate().alpha(1f).translationX(0f).setDuration(520).setInterpolator(SpringInterpolator(15f, 0.75f, 0.9f)).withLayer().start()
         stagger(nw)
         styleNav()
         when (i) {
@@ -899,7 +899,7 @@ class MainActivity : Activity() {
         runElapsed = re
         stat.addView(re, lp(wrapC, wrapC).apply { marginStart = dp(10) })
         run.addView(stat, lp(wrapC, wrapC).apply { bottomMargin = dp(18) })
-        val ring = RingView(this, pal, fonts, 240, 16, true)
+        val ring = TimerDial(this, pal, fonts)
         runRing = ring
         run.addView(ring, lp(wrapC, wrapC))
         val info = tv("", 14f, fonts.regular, pal.muted, Gravity.CENTER).apply { setPadding(0, dp(18), 0, dp(16)) }
@@ -924,7 +924,6 @@ class MainActivity : Activity() {
             clipToOutline = true
             visibility = View.GONE
         }
-        runWrap.addView(SilkView(this, pal.surface, pal.dark), FrameLayout.LayoutParams(matchP, matchP))
         runWrap.addView(run, FrameLayout.LayoutParams(matchP, wrapC))
         runningCard = runWrap
         col.addView(runWrap, lp(matchP, wrapC).apply { topMargin = dp(18) })
@@ -1006,7 +1005,7 @@ class MainActivity : Activity() {
             val onBreak = Store.onBreak(this)
             runRing?.big = clock(Store.focusLeftMs(this))
             runRing?.small = if (onBreak) "On break" else Store.focusTag(this).ifEmpty { "Focus" }
-            runRing?.setProgress(frac, true, 900)
+            runRing?.setSpan(start, end, onBreak)
             runInfo?.text = if (onBreak) "Break ends in ${clock(Store.breakUntil(this) - now)}. Blocks come back after."
             else "${Store.breaksLeft(this)} break(s) left. ${if (Store.focusStrict(this)) "Strict mode is on." else ""}"
             runBreakBtn?.let { b ->
@@ -1022,6 +1021,7 @@ class MainActivity : Activity() {
             runElapsed?.text = clock(now - start)
         } else {
             runEndBtn?.reset()
+            runRing?.stop()
         }
         if (wasRunning && !running) onSessionDone()
         wasRunning = running
