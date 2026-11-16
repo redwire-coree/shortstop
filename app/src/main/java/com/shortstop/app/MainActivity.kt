@@ -74,6 +74,9 @@ class MainActivity : Activity() {
     private var statusChip: CallChip? = null
     private var setupCard: View? = null
     private var healthCard: LinearLayout? = null
+    private var schedIntro: View? = null
+    private var schedPageTitle: View? = null
+    private var schedHeadCard: View? = null
     private var runExtras: View? = null
     private var sitesCountView: OdometerView? = null
     private var suggestBox: LinearLayout? = null
@@ -1521,9 +1524,13 @@ class MainActivity : Activity() {
     private fun schedulePage(): View {
         val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val col = column()
-        col.addView(display("Schedule", 30f))
-        col.addView(tv("Focus starts by itself in these windows. Your focus apps are closed until they end.",
-            14f, fonts.regular, pal.muted).apply { setPadding(0, dp(8), 0, dp(6)) })
+        val sTitle = display("Schedule", 30f)
+        schedPageTitle = sTitle
+        col.addView(sTitle)
+        val intro = tv("Focus starts by itself in these windows. Your focus apps are closed until they end.",
+            14f, fonts.regular, pal.muted).apply { setPadding(0, dp(8), 0, dp(6)) }
+        schedIntro = intro
+        col.addView(intro)
 
         val head = card().apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1539,14 +1546,18 @@ class MainActivity : Activity() {
         hc.addView(schedTitle, lp(matchP, wrapC))
         hc.addView(schedSub, lp(matchP, wrapC))
         head.addView(hc, lp(0, wrapC, 1f))
+        schedHeadCard = head
         col.addView(head, lp(matchP, wrapC).apply { topMargin = dp(14) })
 
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         schedCol = list
         col.addView(list, lp(matchP, wrapC).apply { topMargin = dp(14) })
         page.addView(scrollPage(col), lp(matchP, 0, 1f))
-        val barWrap = LinearLayout(this).apply { setPadding(dp(20), dp(10), dp(20), dp(14)) }
-        barWrap.addView(pill("Create schedule", true) { showScheduleSheet(null) }, lp(matchP, wrapC))
+        val barWrap = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(dp(20), dp(10), dp(20), dp(14)) }
+        barWrap.addView(pill("Create schedule", true) { showScheduleSheet(null) }.apply {
+            textSize = 15f
+            setPadding(dp(40), dp(15), dp(40), dp(15))
+        }, lp(wrapC, wrapC))
         page.addView(barWrap, lp(matchP, wrapC))
         fillSchedules()
         return page
@@ -1611,6 +1622,10 @@ class MainActivity : Activity() {
         schedTimeline = null
         updateSchedHeader()
         val items = Store.schedules(this)
+        val vis = if (items.isEmpty()) View.GONE else View.VISIBLE
+        schedIntro?.visibility = vis
+        schedPageTitle?.visibility = vis
+        schedHeadCard?.visibility = vis
         if (items.isEmpty()) { fillScheduleEmpty(list); return }
 
         val activeId = Store.scheduleActive(this)?.id
@@ -1653,9 +1668,11 @@ class MainActivity : Activity() {
 
     /** Regain-style empty state: a title, a swipeable row of ready-made windows, dots. */
     private fun fillScheduleEmpty(list: LinearLayout) {
-        list.addView(display("Create your study schedule", 28f).apply {
+        val screenW = resources.displayMetrics.widthPixels
+        val screenH = resources.displayMetrics.heightPixels
+        list.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(8), dp(28), dp(8), dp(22))
+            setPadding(dp(8), (screenH * 0.2f).toInt(), dp(8), dp(22))
         }, lp(matchP, wrapC))
         val templates = listOf(
             Triple("Morning Study", 6 * 60, 8 * 60),
@@ -1663,23 +1680,21 @@ class MainActivity : Activity() {
             Triple("Evening Study", 18 * 60, 20 * 60),
             Triple("Night Study", 20 * 60, 22 * 60)
         )
-        val screenW = resources.displayMetrics.widthPixels
-        val cardW = (screenW * 0.62f).toInt()
-        val sidePad = (screenW - cardW) / 2
-        val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(sidePad - dp(20), 0, sidePad - dp(20), 0) }
+        val cardW = screenW - dp(76)
+        val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(14), 0, dp(14), 0) }
         templates.forEachIndexed { i, (n, st, en) ->
             val c = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                background = round(pal.surface, 28, pal.border, dp(1))
-                setPadding(dp(22), dp(22), dp(18), dp(20))
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = round(pal.surface, 22, pal.border, dp(1))
+                setPadding(dp(18), dp(14), dp(14), dp(14))
             }
-            val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val lc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            lc.addView(tv(n, 18f, fonts.semi, pal.ink))
-            lc.addView(tv("${fmt12(st)} – ${fmt12(en)}", 14f, fonts.regular, pal.ink).apply { setPadding(0, dp(8), 0, 0) })
-            lc.addView(tv(daysLabel(31), 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(2), 0, 0) })
-            top.addView(lc, lp(0, wrapC, 1f))
-            val add = tv("+", 24f, fonts.regular, pal.canvas, Gravity.CENTER).apply {
+            lc.addView(tv(n, 15f, fonts.semi, pal.ink))
+            lc.addView(tv("${fmt12(st)} – ${fmt12(en)}  ·  ${daysLabel(31)}", 12f, fonts.regular, pal.muted).apply { setPadding(0, dp(3), 0, 0) })
+            c.addView(lc, lp(0, wrapC, 1f).apply { marginEnd = dp(10) })
+            val add = tv("+", 20f, fonts.regular, pal.canvas, Gravity.CENTER).apply {
+                includeFontPadding = false
                 background = round(pal.ink, 40)
                 isClickable = true
                 setOnClickListener {
@@ -1691,43 +1706,35 @@ class MainActivity : Activity() {
                 }
                 press(this)
             }
-            top.addView(add, lp(dp(40), dp(40)))
-            c.addView(top, lp(matchP, wrapC))
+            c.addView(add, lp(dp(34), dp(34)))
             strip.addView(c, lp(cardW, wrapC).apply { marginStart = dp(6); marginEnd = dp(6) })
         }
         val hs = android.widget.HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
-            clipToPadding = false
         }
         hs.addView(strip)
         val step = cardW + dp(12)
         val dots = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         val dotViews = templates.indices.map {
-            View(this).also { d -> dots.addView(d, lp(dp(7), dp(7)).apply { marginStart = dp(4); marginEnd = dp(4) }) }
+            View(this).also { d -> dots.addView(d, lp(dp(6), dp(6)).apply { marginStart = dp(3); marginEnd = dp(3) }) }
         }
         fun paintDots(x: Int) {
             val cur = ((x + step / 2) / step).coerceIn(0, templates.size - 1)
-            dotViews.forEachIndexed { i, d ->
-                d.background = round(if (i == cur) pal.ink else pal.track, 40)
-            }
+            dotViews.forEachIndexed { i, d -> d.background = round(if (i == cur) pal.ink else pal.track, 40) }
         }
         paintDots(0)
         hs.setOnScrollChangeListener { _, x, _, _, _ -> paintDots(x) }
         hs.setOnTouchListener { v, ev ->
             if (ev.action == MotionEvent.ACTION_UP || ev.action == MotionEvent.ACTION_CANCEL) {
                 v.postDelayed({
-                    val x = hs.scrollX
-                    hs.smoothScrollTo(((x + step / 2) / step).coerceIn(0, templates.size - 1) * step, 0)
+                    hs.smoothScrollTo(((hs.scrollX + step / 2) / step).coerceIn(0, templates.size - 1) * step, 0)
                 }, 90)
             }
             false
         }
         list.addView(hs, lp(matchP, wrapC))
-        list.addView(dots, lp(matchP, wrapC).apply { topMargin = dp(18) })
-        list.addView(tv("Pick one, or build your own below.", 14f, fonts.regular, pal.muted, Gravity.CENTER).apply {
-            setPadding(0, dp(16), 0, 0)
-        }, lp(matchP, wrapC))
+        list.addView(dots, lp(matchP, wrapC).apply { topMargin = dp(14) })
     }
 
     private fun showScheduleSheet(existing: Store.FocusSchedule?) {
