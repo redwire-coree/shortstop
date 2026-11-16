@@ -295,6 +295,36 @@ class GlowCard(ctx: Context, private val glow: Int, private val corner: Float, p
 
     init { setWillNotDraw(false) }
 
+    /** Dark mode: a soft shine falling from the top edge, always on. Touch glow stays finger-only. */
+    var ambient = false
+    private var shineW = 0
+    private var shineH = 0
+    private val shinePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val shineEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = ctx.px(1f) }
+
+    private fun drawShine(c: Canvas) {
+        val w = width
+        val h = height
+        if (w <= 0 || h <= 0) return
+        if (w != shineW || h != shineH) {
+            shineW = w; shineH = h
+            val reach = minOf(h.toFloat(), size * 0.9f)
+            shinePaint.shader = LinearGradient(0f, 0f, 0f, reach,
+                Color.argb(30, 255, 255, 255), Color.argb(0, 255, 255, 255), Shader.TileMode.CLAMP)
+            shineEdge.shader = LinearGradient(0f, 0f, 0f, h * 0.6f,
+                Color.argb(80, 255, 255, 255), Color.argb(0, 255, 255, 255), Shader.TileMode.CLAMP)
+        }
+        rect.set(0f, 0f, w.toFloat(), h.toFloat())
+        clip.reset()
+        clip.addRoundRect(rect, corner, corner, Path.Direction.CW)
+        c.save()
+        c.clipPath(clip)
+        c.drawRect(rect, shinePaint)
+        c.restore()
+        er.set(0.5f, 0.5f, w - 0.5f, h - 0.5f)
+        c.drawRoundRect(er, corner, corner, shineEdge)
+    }
+
     private fun fade(to: Float) {
         anim?.cancel()
         anim = ValueAnimator.ofFloat(amt, to).apply {
@@ -327,6 +357,7 @@ class GlowCard(ctx: Context, private val glow: Int, private val corner: Float, p
 
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
+        if (ambient) drawShine(c)
         val live = amt >= 0.01f
         val waving = wave < 1f
         if (!live && !waving) return

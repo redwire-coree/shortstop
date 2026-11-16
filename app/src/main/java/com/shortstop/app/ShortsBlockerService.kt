@@ -89,6 +89,7 @@ class ShortsBlockerService : AccessibilityService() {
         super.onServiceConnected()
         reloadCache()
         Store.prefs(this).registerOnSharedPreferenceChangeListener(prefListener)
+        alive = true
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -154,18 +155,15 @@ class ShortsBlockerService : AccessibilityService() {
         }
 
         // 3. Websites inside a browser (the address bar is read; any browser works, known ones are just quicker)
-        if (sitesCache.isNotEmpty() && isBrowser(pkg) && now - lastUrlCheck > 250) {
-            lastUrlCheck = now
-            val root = rootInActiveWindow
-            if (root != null && root.packageName?.toString() == pkg) {
-                val d = blockedDomainOn(pkg, root)
-                if (d != null) {
-                    val key = Store.webKey(d)
-                    if (hardNow || Store.isActive(this, key)) {
-                        handleHit(null, key, pkg)
-                        return
-                    }
-                }
+        if (sitesCache.isNotEmpty() && isBrowser(pkg)) {
+            startWebWatch()
+            if (now - lastUrlCheck > 250) {
+                lastUrlCheck = now
+                if (checkWeb(pkg, hardNow)) return
+            } else {
+                // throttled: look again shortly so the final address-bar text is never missed
+                handler.removeCallbacks(webRecheck)
+                handler.postDelayed(webRecheck, 300)
             }
         }
 
@@ -173,6 +171,48 @@ class ShortsBlockerService : AccessibilityService() {
         val site = Store.siteFor(pkg) ?: return
         val key = findHit(site, pkg) ?: return
         handleHit(site, key, pkg)
+    }
+
+    // ---------- website watch ----------
+    private var watchingWeb = false
+
+    private fun checkWeb(pkg: String, hardNow: Boolean): Boolean {
+        val root = rootInActiveWindow ?: return false
+        if (root.packageName?.toString() != pkg) return false
+        val d = blockedDomainOn(pkg, root) ?: return false
+        val key = Store.webKey(d)
+        if (hardNow || Store.isActive(this, key)) {
+            handleHit(null, key, pkg)
+            return true
+        }
+        return false
+    }
+
+    private val webRecheck = Runnable {
+        if (wall != null) return@Runnable
+        val pkg = rootInActiveWindow?.packageName?.toString() ?: return@Runnable
+        if (sitesCache.isNotEmpty() && isBrowser(pkg) && SystemClock.uptimeMillis() - lastBlock > 900) {
+            lastUrlCheck = SystemClock.uptimeMillis()
+            checkWeb(pkg, hard())
+        }
+    }
+
+    private val webTick = object : Runnable {
+        override fun run() {
+            val pkg = try { rootInActiveWindow?.packageName?.toString() } catch (e: Exception) { null }
+            if (pkg != null && sitesCache.isNotEmpty() && isBrowser(pkg)) {
+                webRecheck.run()
+                handler.postDelayed(this, 800)
+            } else {
+                watchingWeb = false
+            }
+        }
+    }
+
+    private fun startWebWatch() {
+        if (watchingWeb) return
+        watchingWeb = true
+        handler.postDelayed(webTick, 800)
     }
 
     // ---------- websites ----------
@@ -505,11 +545,13 @@ class ShortsBlockerService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
+        alive = false
         closeWall()
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
+        alive = false
         try { Store.prefs(this).unregisterOnSharedPreferenceChangeListener(prefListener) } catch (e: Exception) { }
         closeWall()
         handler.removeCallbacksAndMessages(null)
@@ -517,6 +559,9 @@ class ShortsBlockerService : AccessibilityService() {
     }
 
     companion object {
+        /** True while the system has this service connected (used by the in-app health card). */
+        @Volatile var alive = false
+
         private const val COVER_KEY = "cover:home"
 
         private val SETTINGS_PKGS = setOf(

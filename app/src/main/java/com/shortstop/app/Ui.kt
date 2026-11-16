@@ -18,7 +18,7 @@ class Palette(ctx: Context) {
     val muted = Color.parseColor(if (dark) "#A1A1AA" else "#666666")
     val surface = Color.parseColor(if (dark) "#141417" else "#F5F5F5")
     val border = Color.parseColor(if (dark) "#27272C" else "#E5E5E5")
-    val track = Color.parseColor(if (dark) "#35353B" else "#D4D4D4")
+    val track = if (dark) Color.argb(46, 255, 255, 255) else Color.argb(36, 0, 0, 0)  // translucent so it blends with whatever is behind
 }
 
 /** Inter in four weights, bundled in assets/fonts, with system fallbacks. */

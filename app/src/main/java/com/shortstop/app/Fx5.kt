@@ -127,10 +127,12 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
             shadowP.shader = shadowShader
         }
         // wide soft drop shadow, then a tight contact shadow right under the edge
-        shadowM.setScale(faceR * 1.42f, faceR * 1.42f); shadowM.postTranslate(cx, cy + 12f * d)
+        // radius is capped so the shadow always ends inside the view and never shows a hard edge
+        val wideR = minOf(faceR * 1.25f, width / 2f - 1f, height - (cy + 8f * d) - 1f).coerceAtLeast(faceR)
+        shadowM.setScale(wideR, wideR); shadowM.postTranslate(cx, cy + 8f * d)
         shadowShader!!.setLocalMatrix(shadowM)
         shadowP.alpha = 255
-        c.drawCircle(cx, cy + 12f * d, faceR * 1.42f, shadowP)
+        c.drawCircle(cx, cy + 8f * d, wideR, shadowP)
         shadowM.setScale(faceR * 1.1f, faceR * 1.1f); shadowM.postTranslate(cx, cy + 3f * d)
         shadowShader!!.setLocalMatrix(shadowM)
         shadowP.alpha = 140
