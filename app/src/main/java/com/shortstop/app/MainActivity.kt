@@ -1669,10 +1669,11 @@ class MainActivity : Activity() {
     /** Regain-style empty state: a title, a swipeable row of ready-made windows, dots. */
     private fun fillScheduleEmpty(list: LinearLayout) {
         val screenW = resources.displayMetrics.widthPixels
-        val screenH = resources.displayMetrics.heightPixels
+        // Dither Veil: burn through the 1-bit photo with a finger
+        list.addView(DitherVeil(this, pal.dark), lp(matchP, dp(250)).apply { topMargin = dp(40) })
         list.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(8), (screenH * 0.2f).toInt(), dp(8), dp(22))
+            setPadding(dp(8), dp(14), dp(8), dp(22))
         }, lp(matchP, wrapC))
         val templates = listOf(
             Triple("Morning Study", 6 * 60, 8 * 60),
