@@ -212,3 +212,4 @@ class TagPicker(
         }
     }
 }
+private fun Context.dpf(v: Float) = v * resources.displayMetrics.density
