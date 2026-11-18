@@ -1329,8 +1329,9 @@ class MainActivity : Activity() {
                     }
                     val mark = StatusMark(this, pal, 24f)
                     mark.setStatus(if (s.done) StatusMark.DONE else StatusMark.CANCELLED, true, idx * 70L)
-                    mark.isClickable = true
-                    mark.setOnClickListener { showSessionSheet(s) }
+                    r.isClickable = true
+                    r.setOnClickListener { showSessionSheet(s) }
+                    press(r)
                     r.addView(mark, lp(wrapC, wrapC).apply { marginEnd = dp(12) })
                     val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
                     left.addView(tv(s.tag.ifEmpty { "Focus" }, 15f, fonts.medium, pal.ink).apply {
@@ -1497,41 +1498,38 @@ class MainActivity : Activity() {
         showSheet("Start focus", box)
     }
 
-    /** A shareable card for one focus session, with a slide to share in the card's own colour. */
+    /** Tap a session: the same 3D reflective card as the completion sheet, a heart, and a slide to share. */
     private fun showSessionSheet(s: Store.Session) {
         val tag = s.tag.ifEmpty { "Focus" }
-        val base = if (s.done) TagColors.of(s.tag) else Color.parseColor("#7C7C8A")
-        val df = SimpleDateFormat("EEE, d MMM · " + (if (DateFormat.is24HourFormat(this)) "HH:mm" else "h:mm a"), Locale.getDefault())
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(24), dp(24), dp(24))
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(mixColor(base, Color.WHITE, 0.12f), mixColor(base, Color.BLACK, 0.28f))).apply { cornerRadius = dp(28).toFloat() }
-        }
-        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(tv(tag.uppercase(), 12f, fonts.semi, Color.WHITE).apply { letterSpacing = 0.14f; alpha = 0.85f }, lp(0, wrapC, 1f))
-        top.addView(tv(if (s.done) "Completed" else "Ended early", 12f, fonts.semi, Color.WHITE, Gravity.CENTER).apply {
-            background = round(Color.argb(60, 255, 255, 255), 40)
-            setPadding(dp(12), dp(5), dp(12), dp(5))
-        })
-        card.addView(top, lp(matchP, wrapC))
-        card.addView(tv(fmtMin(s.minutes), 54f, fonts.bold, Color.WHITE).apply { letterSpacing = -0.03f; setPadding(0, dp(28), 0, 0) })
-        card.addView(tv("of focused time", 14f, fonts.regular, Color.WHITE).apply { alpha = 0.8f })
-        card.addView(tv(df.format(java.util.Date(s.start)), 13f, fonts.medium, Color.WHITE).apply { alpha = 0.8f; setPadding(0, dp(26), 0, 0) })
-        card.addView(tv("Shortstop", 13f, fonts.bold, Color.WHITE).apply { alpha = 0.55f; setPadding(0, dp(4), 0, 0) })
-        card.alpha = 0f; card.translationY = dp(16).toFloat(); card.scaleX = 0.96f; card.scaleY = 0.96f
-        card.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(SpringInterpolator(12f, 0.8f, 0.9f)).start()
-
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(4)) }
+        val sessions = Store.sessions(this)
+        val data = FocusCardData(
+            badge = if (s.done) "Focus complete" else "Session ended",
+            status = if (s.done) "Done" else "Ended",
+            eyebrow = "FOCUSED FOR",
+            big = fmtMin(s.minutes),
+            line = "$tag · " + SimpleDateFormat("EEE d MMM, " + (if (DateFormat.is24HourFormat(this)) "HH:mm" else "h:mm a"), Locale.getDefault()).format(java.util.Date(s.start)),
+            stats = listOf(
+                "Today" to fmtMin(Store.focusMinutesAgo(this, 0)),
+                "Streak" to (Store.streak(this).let { if (it == 1) "1 day" else "$it days" }),
+                "Sessions" to sessions.size.toString()
+            ),
+            idLabel = "Get Shortstop",
+            idValue = APP_LINK_SHORT
+        )
+        val card = ReflectiveCard(this, fonts, data)
         box.addView(card, lp(matchP, wrapC))
+        val heartRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        heartRow.addView(tv("Keep this session", 14f, fonts.regular, pal.muted), lp(0, wrapC, 1f))
+        heartRow.addView(PulseHeart(this, pal, fonts, Store.lovedCount(this), Store.isLoved(this, s.start), true) { on, _ ->
+            Store.setLoved(this, s.start, on)
+        }, lp(wrapC, wrapC))
+        box.addView(heartRow, lp(matchP, wrapC).apply { bottomMargin = dp(12) })
+        val shareText = "I stayed focused for ${fmtMin(s.minutes)} with Shortstop. No Shorts, no Reels, just the work.\n$APP_LINK"
         val slide = SlideCommit(this, pal, fonts, "Slide to share", "Sharing", { true }) {
-            val msg = if (s.done) "I focused for ${fmtMin(s.minutes)} on $tag with Shortstop." else "I focused for ${fmtMin(s.minutes)} on $tag with Shortstop."
-            val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, msg) }
-            closeSheet()
-            try { startActivity(Intent.createChooser(send, "Share your focus")) } catch (e: Exception) { }
+            shareFocusCard(this, card, shareText)
         }
-        slide.accent = mixColor(base, Color.WHITE, 0.5f)
-        slide.deep = mixColor(base, Color.BLACK, 0.6f)
-        box.addView(slide, lp(matchP, wrapC).apply { topMargin = dp(18); bottomMargin = dp(4) })
+        box.addView(slide, lp(matchP, wrapC).apply { bottomMargin = dp(4) })
         showSheet("Focus session", box)
     }
 
@@ -1713,11 +1711,14 @@ class MainActivity : Activity() {
 
     /** Regain-style empty state: a title, a swipeable row of ready-made windows, dots. */
     private fun fillScheduleEmpty(list: LinearLayout) {
+        val holder = FrameLayout(this)
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val blurView = UpwardBlurView(this).apply { visibility = View.GONE }
         val screenW = resources.displayMetrics.widthPixels
         // Dither Veil: burn through the 1-bit photo with a finger
         val veil = DitherVeil(this, pal.dark, pal.canvas)
-        list.addView(veil, lp(matchP, dp(250)).apply { topMargin = dp(40) })
-        list.addView(display("Create your\nstudy schedule", 22f).apply {
+        content.addView(veil, lp(matchP, dp(250)).apply { topMargin = dp(40) })
+        content.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(14), dp(8), dp(22))
         }, lp(matchP, wrapC))
@@ -1745,7 +1746,11 @@ class MainActivity : Activity() {
                 setOnClickListener {
                     if (busy) return@setOnClickListener
                     busy = true
-                    veil.playAway {
+                    val bmp = Bitmap.createBitmap(content.width, content.height, Bitmap.Config.ARGB_8888)
+                    content.draw(Canvas(bmp))
+                    blurView.visibility = View.VISIBLE
+                    content.visibility = View.INVISIBLE
+                    blurView.start(bmp) {
                         Store.saveSchedules(this@MainActivity, Store.schedules(this@MainActivity) +
                             Store.FocusSchedule(System.currentTimeMillis().toString() + i, n, st, en, 31, true))
                         fillSchedules()
@@ -1782,8 +1787,11 @@ class MainActivity : Activity() {
             }
             false
         }
-        list.addView(hs, lp(matchP, wrapC))
-        list.addView(dots, lp(matchP, wrapC).apply { topMargin = dp(14) })
+        content.addView(hs, lp(matchP, wrapC))
+        content.addView(dots, lp(matchP, wrapC).apply { topMargin = dp(14) })
+        holder.addView(content, FrameLayout.LayoutParams(matchP, wrapC))
+        holder.addView(blurView, FrameLayout.LayoutParams(matchP, matchP))
+        list.addView(holder, lp(matchP, wrapC))
     }
 
     private fun showScheduleSheet(existing: Store.FocusSchedule?) {
