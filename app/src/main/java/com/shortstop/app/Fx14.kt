@@ -112,104 +112,214 @@ class SiteLogo(ctx: Context, private val domain: String, private val pal: Palett
     }
 }
 
-/** Focus-category colours: calm, slightly deepened tones that sit well on both themes. */
+/** Focus-category colours (the little dots): vivid, distinct, readable on light and dark. */
 object TagColors {
     fun of(tag: String): Int = Color.parseColor(when (tag) {
-        "Study" -> "#1F8A5B"
-        "Work" -> "#3B5BDB"
-        "Read" -> "#B7791F"
-        "Fitness" -> "#D9483B"
-        else -> "#6B7280"
+        "Study" -> "#10B981"
+        "Work" -> "#6366F1"
+        "Code", "Read" -> "#06B6D4"
+        "Fitness" -> "#F43F5E"
+        else -> "#A855F7"
     })
-    fun deep(tag: String): Int = Color.parseColor(when (tag) {
-        "Study" -> "#0B3B27"
-        "Work" -> "#142369"
-        "Read" -> "#4A2F06"
-        "Fitness" -> "#561410"
-        else -> "#1F2430"
-    })
+    fun deep(tag: String): Int = mixColor(of(tag), Color.BLACK, 0.68f)
 }
 
-/** One track, one pill that glides (spring) to the chosen tag and melts into its colour. */
+/**
+ * Port of react-bits PillNav (split layout, pill items, pill indicator, Ember highlight #FF5A1F, bounce 0.71,
+ * stretch 0.5): raised pills on a glass bar, one orange pill glides to the tapped item with a stretching
+ * two-edge spring, white labels ride inside it. Each idle tag keeps its small coloured dot.
+ */
 class TagPicker(
     ctx: Context, private val pal: Palette, private val fonts: Fonts,
     private val tags: List<String>, start: String, private val onPick: (String) -> Unit
 ) : View(ctx) {
+    private val d = ctx.resources.displayMetrics.density
     private var sel = tags.indexOf(start).coerceAtLeast(0)
-    private var pos = sel.toFloat()          // animated pill position in cells
-    private var color = TagColors.of(tags[sel])
-    private var pulse = 0f
-    private var anim: android.animation.ValueAnimator? = null
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val t = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = fonts.semi; textAlign = Paint.Align.CENTER; textSize = ctx.dpf(13f) }
+    private var x0 = 0f; private var x1 = 0f; private var v0 = 0f; private var v1 = 0f
+    private var press = 1f; private var pressV = 0f; private var pressing = false
+    private var pop = 1f
+    private var ready = false
+    private var last = 0L
+    private val HI = Color.parseColor("#FF5A1F")
+    private val bounce = 0.71f
+    private val stretch = 0.5f
+    private val pad = 4f * d
+    private val gap = 3f * d
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = fonts.medium; textAlign = Paint.Align.LEFT; textSize = 13f * d }
     private val r = RectF()
-    private val gap = ctx.dpf(4f)
+    private val clip = Path()
+    private var cell = 0f
 
     init { isClickable = true }
 
+    private fun t0(i: Int) = pad + i * (cell + gap)
+    private fun t1(i: Int) = t0(i) + cell
+
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        super.onSizeChanged(w, h, ow, oh)
+        cell = (w - pad * 2 - gap * (tags.size - 1)) / tags.size
+        x0 = t0(sel); x1 = t1(sel); v0 = 0f; v1 = 0f
+        ready = true
+    }
+
     fun select(i: Int) {
         if (i == sel) return
-        val from = pos
-        val c0 = color
-        val c1 = TagColors.of(tags[i])
         sel = i
-        anim?.cancel()
-        anim = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 520
-            interpolator = SpringInterpolator(10f, 0.72f, 0.52f)
-            addUpdateListener {
-                val f = it.animatedValue as Float
-                pos = from + (i - from) * f
-                color = mixColor(c0, c1, f.coerceIn(0f, 1f))
-                pulse = kotlin.math.sin(Math.PI * it.animatedFraction.coerceIn(0f, 1f)).toFloat()
-                invalidate()
-            }
-            start()
-        }
+        pop = 0.92f
         performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
         onPick(tags[i])
+        last = 0L
+        postInvalidateOnAnimation()
     }
 
     override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
-        if (e.actionMasked == android.view.MotionEvent.ACTION_UP) {
-            select((e.x / (width.toFloat() / tags.size)).toInt().coerceIn(0, tags.size - 1))
-            performClick()
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> { pressing = true; last = 0L; postInvalidateOnAnimation(); parent?.requestDisallowInterceptTouchEvent(true) }
+            android.view.MotionEvent.ACTION_UP -> {
+                pressing = false
+                select(((e.x - pad) / (cell + gap)).toInt().coerceIn(0, tags.size - 1))
+                performClick()
+                last = 0L; postInvalidateOnAnimation()
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> { pressing = false; last = 0L; postInvalidateOnAnimation() }
         }
         return true
     }
 
+    /** Advances the springs; returns true while anything is still moving. */
+    private fun step(now: Long): Boolean {
+        val dt = if (last == 0L) 1f / 60f else minOf(0.05f, (now - last) / 1e9f)
+        last = now
+        val a = t0(sel); val b = t1(sel)
+        val dir = Math.signum((a + b) / 2f - (x0 + x1) / 2f)
+        val base = 520f
+        val lead = base * (1f + 0.9f * stretch)
+        val trail = base * (1f - 0.5f * stretch)
+        val k0 = if (dir < 0) lead else if (dir > 0) trail else base
+        val k1 = if (dir > 0) lead else if (dir < 0) trail else base
+        val zeta = 1f - 0.55f * bounce
+        val steps = Math.ceil((dt / (1f / 240f)).toDouble()).toInt().coerceAtLeast(1)
+        val h = dt / steps
+        for (i in 0 until steps) {
+            v0 += (-k0 * (x0 - a) - 2f * zeta * Math.sqrt(k0.toDouble()).toFloat() * v0) * h
+            x0 += v0 * h
+            v1 += (-k1 * (x1 - b) - 2f * zeta * Math.sqrt(k1.toDouble()).toFloat() * v1) * h
+            x1 += v1 * h
+        }
+        pop += (1f - pop) * (1f - Math.exp((-dt / 0.09f).toDouble()).toFloat())
+        val pt = if (pressing) 0.95f else 1f
+        pressV += (-700f * (press - pt) - 30f * pressV) * dt
+        press += pressV * dt
+        return Math.abs(x0 - a) > 0.05f || Math.abs(x1 - b) > 0.05f || Math.abs(v0) > 0.5f || Math.abs(v1) > 0.5f ||
+            Math.abs(1f - pop) > 0.001f || Math.abs(press - pt) > 0.0005f || Math.abs(pressV) > 0.01f
+    }
+
+    private fun label(c: Canvas, i: Int, color: Int, dotAlpha: Float) {
+        val h = height.toFloat()
+        val cx = (t0(i) + t1(i)) / 2f
+        val name = tags[i]
+        val tw = txt.measureText(name)
+        val dot = 2.1f * d
+        val dg = 5f * d
+        val total = tw + (dot * 2f + dg)
+        val left = cx - total / 2f
+        val ty = h / 2f - (txt.ascent() + txt.descent()) / 2f
+        if (dotAlpha > 0.01f) {
+            paint.style = Paint.Style.FILL
+            paint.color = TagColors.of(name)
+            paint.alpha = (255 * dotAlpha).toInt()
+            c.drawCircle(left + dot, h / 2f, dot, paint)
+            paint.alpha = 255
+        }
+        txt.color = color
+        c.drawText(name, left + dot * 2f + dg, ty, txt)
+    }
+
     override fun onDraw(c: Canvas) {
+        if (!ready) return
+        val moving = step(System.nanoTime())
         val w = width.toFloat(); val h = height.toFloat()
-        val cell = w / tags.size
-        // track
-        r.set(1f, 1f, w - 1f, h - 1f)
-        p.style = Paint.Style.FILL; p.color = pal.surface
-        c.drawRoundRect(r, h / 2f, h / 2f, p)
-        p.style = Paint.Style.STROKE; p.strokeWidth = context.dpf(1f); p.color = pal.border
-        c.drawRoundRect(r, h / 2f, h / 2f, p)
-        // pill
-        val grow = pulse * context.dpf(2f)
-        r.set(pos * cell + gap - grow, gap - grow, (pos + 1) * cell - gap + grow, h - gap + grow)
-        p.style = Paint.Style.FILL
-        p.shader = LinearGradient(r.left, r.top, r.right, r.bottom, mixColor(color, Color.WHITE, 0.14f), mixColor(color, Color.BLACK, 0.12f), Shader.TileMode.CLAMP)
-        c.drawRoundRect(r, r.height() / 2f, r.height() / 2f, p)
-        p.shader = null
-        // labels
+        val dark = pal.dark
+        // glass bar
+        r.set(0.5f, 0.5f, w - 0.5f, h - 0.5f)
+        paint.style = Paint.Style.FILL
+        paint.color = if (dark) Color.argb(168, 38, 35, 46) else Color.argb(204, 240, 240, 243)
+        c.drawRoundRect(r, h / 2f, h / 2f, paint)
+        paint.style = Paint.Style.STROKE; paint.strokeWidth = d
+        paint.color = if (dark) Color.argb(20, 255, 255, 255) else Color.argb(18, 24, 24, 27)
+        c.drawRoundRect(r, h / 2f, h / 2f, paint)
+        // raised item pills
+        val ih = h - pad * 2f
+        val strong = if (dark) Color.parseColor("#F4F4F5") else Color.parseColor("#18181B")
+        val pillL = x0; val pillR = x1
         for (i in tags.indices) {
-            val near = (1f - kotlin.math.abs(pos - i)).coerceIn(0f, 1f)
-            val cx = (i + 0.5f) * cell
-            t.color = mixColor(pal.muted, Color.WHITE, near)
-            val ty = h / 2f - (t.ascent() + t.descent()) / 2f
-            val tw = t.measureText(tags[i])
-            val dot = context.dpf(3.2f) * (1f - near)
-            val off = (dot * 2f + context.dpf(5f)) * (1f - near) / 2f
-            if (dot > 0.2f) {
-                p.color = TagColors.of(tags[i]); p.alpha = (255 * (1f - near)).toInt()
-                c.drawCircle(cx - tw / 2f - off + dot - context.dpf(1f), h / 2f, dot, p)
-                p.alpha = 255
-            }
-            c.drawText(tags[i], cx + off, ty, t)
+            r.set(t0(i), pad, t1(i), pad + ih)
+            paint.style = Paint.Style.FILL
+            paint.shader = LinearGradient(0f, r.top, 0f, r.bottom,
+                if (dark) Color.parseColor("#3A3644") else Color.WHITE,
+                if (dark) Color.parseColor("#27242F") else Color.parseColor("#F6F6F8"), Shader.TileMode.CLAMP)
+            c.drawRoundRect(r, ih / 2f, ih / 2f, paint)
+            paint.shader = null
+            paint.style = Paint.Style.STROKE; paint.strokeWidth = d
+            paint.color = if (dark) Color.argb(18, 255, 255, 255) else Color.argb(20, 24, 24, 27)
+            r.inset(0.5f, 0.5f)
+            c.drawRoundRect(r, ih / 2f, ih / 2f, paint)
+            val ov = (minOf(t1(i), pillR) - maxOf(t0(i), pillL)).coerceAtLeast(0f) / cell
+            label(c, i, strong, 1f - ov.coerceIn(0f, 1f))
+        }
+        // gliding orange pill + the white labels riding inside it
+        val width = (x1 - x0).coerceAtLeast(0f)
+        val scale = press * pop
+        val squash = 1f - ((width / cell - 1f) * 0.3f).coerceIn(0f, 0.14f)
+        val cxp = (x0 + x1) / 2f; val cyp = pad + ih / 2f
+        val hw = width * scale / 2f; val hh = ih * scale * squash / 2f
+        r.set(cxp - hw, cyp - hh, cxp + hw, cyp + hh)
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb(46, 255, 90, 31)
+        r.inset(-d * 1.5f, -d * 1.5f)
+        c.drawRoundRect(r, hh + d, hh + d, paint)
+        r.inset(d * 1.5f, d * 1.5f)
+        paint.shader = LinearGradient(0f, r.top, 0f, r.bottom, mixColor(HI, Color.WHITE, 0.1f), HI, Shader.TileMode.CLAMP)
+        c.drawRoundRect(r, hh, hh, paint)
+        paint.shader = null
+        c.save()
+        clip.reset(); clip.addRoundRect(r, hh, hh, Path.Direction.CW)
+        c.clipPath(clip)
+        for (i in tags.indices) if (t1(i) > pillL - 2f && t0(i) < pillR + 2f) label(c, i, Color.WHITE, 0f)
+        c.restore()
+        if (moving) postInvalidateOnAnimation() else last = 0L
+    }
+}
+
+/** Left-to-right wrapping rows (used for the Popular sites so nothing is cut off). */
+class FlowLayout(ctx: Context, private val hGap: Int, private val vGap: Int) : android.view.ViewGroup(ctx) {
+    override fun onMeasure(wSpec: Int, hSpec: Int) {
+        val maxW = MeasureSpec.getSize(wSpec)
+        var x = 0; var y = 0; var rowH = 0
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            if (c.visibility == GONE) continue
+            c.measure(MeasureSpec.makeMeasureSpec(maxW, MeasureSpec.AT_MOST), MeasureSpec.UNSPECIFIED)
+            if (x > 0 && x + c.measuredWidth > maxW) { x = 0; y += rowH + vGap; rowH = 0 }
+            x += c.measuredWidth + hGap
+            rowH = maxOf(rowH, c.measuredHeight)
+        }
+        setMeasuredDimension(maxW, y + rowH)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val maxW = r - l
+        var x = 0; var y = 0; var rowH = 0
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            if (c.visibility == GONE) continue
+            if (x > 0 && x + c.measuredWidth > maxW) { x = 0; y += rowH + vGap; rowH = 0 }
+            c.layout(x, y, x + c.measuredWidth, y + c.measuredHeight)
+            x += c.measuredWidth + hGap
+            rowH = maxOf(rowH, c.measuredHeight)
         }
     }
 }
+
 private fun Context.dpf(v: Float) = v * resources.displayMetrics.density

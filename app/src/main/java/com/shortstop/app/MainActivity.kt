@@ -79,7 +79,10 @@ class MainActivity : Activity() {
     private var schedHeadCard: View? = null
     private var runExtras: View? = null
     private var sitesCountView: OdometerView? = null
-    private var suggestBox: LinearLayout? = null
+    private var suggestBox: ViewGroup? = null
+    private var previewBox: LinearLayout? = null
+    private var popLabel: View? = null
+    private var lastSiteCount = -1
     private var lastAddedSite: String? = null
     private var schedTitle: TextView? = null
     private var schedSub: TextView? = null
@@ -1409,7 +1412,7 @@ class MainActivity : Activity() {
 
     private fun showStartSheet() {
         var dur = Store.lastMinutes(this)
-        var tag = Store.lastTag(this)
+        var tag = Store.lastTag(this).let { if (it in Store.TAGS) it else Store.TAGS[0] }
         var strict = Store.strictDefault(this)
         var breaks = Store.lastBreaks(this)
         var breakMin = Store.lastBreakMin(this)
@@ -2227,7 +2230,8 @@ class MainActivity : Activity() {
         val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         lateinit var urlInput: EditText
         fun addSite() {
-            val d = Store.cleanDomain(urlInput.text.toString())
+            val q0 = urlInput.text.toString().trim().lowercase()
+            val d = Store.cleanDomain(q0) ?: if (q0.length >= 2 && !q0.contains('.') && !q0.contains(' ')) Store.cleanDomain("$q0.com") else null
             if (d == null) {
                 toast("Type a site like reddit.com")
                 return
@@ -2244,16 +2248,18 @@ class MainActivity : Activity() {
         addRow.addView(curved, lp(matchP, wrapC))
         webCol.addView(addRow)
 
+        // live preview of what you are typing, right under the box so the keyboard never hides it
+        val pvBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        previewBox = pvBox
+        webCol.addView(pvBox, lp(matchP, wrapC).apply { topMargin = dp(12) })
+
         // one-tap popular sites
-        webCol.addView(groupLabel("Popular").apply { setPadding(dp(4), dp(16), 0, dp(8)) })
-        val sugScroll = android.widget.HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-        }
-        val sug = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val pl = groupLabel("Popular").apply { setPadding(dp(4), dp(16), 0, dp(8)) }
+        popLabel = pl
+        webCol.addView(pl)
+        val sug = FlowLayout(this, dp(8), dp(8))
         suggestBox = sug
-        sugScroll.addView(sug)
-        webCol.addView(sugScroll, lp(matchP, wrapC))
+        webCol.addView(sug, lp(matchP, wrapC))
 
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         sitesBox = box
@@ -2274,7 +2280,7 @@ class MainActivity : Activity() {
         val box = sitesBox ?: return
         box.removeAllViews()
         val sites = Store.blockedSites(this)
-        sitesCountView?.setValue(sites.size)
+        if (lastSiteCount != sites.size) { sitesCountView?.setValue(sites.size, lastSiteCount >= 0); lastSiteCount = sites.size }
 
         // popular chips (the ones already blocked drop out)
         suggestBox?.let { sug ->
@@ -2302,10 +2308,14 @@ class MainActivity : Activity() {
                 chip.addView(tv(dom, 13f, fonts.semi, pal.ink))
                 sug.addView(chip, lp(wrapC, wrapC).apply { if (i < left.size - 1) marginEnd = dp(8) })
             }
-            (sug.parent as? View)?.visibility = if (left.isEmpty()) View.GONE else View.VISIBLE
+            val vis = if (left.isEmpty()) View.GONE else View.VISIBLE
+            sug.visibility = vis
+            popLabel?.visibility = vis
         }
 
         // live preview while typing: what will be blocked, with its logo
+        val pvb = previewBox
+        pvb?.removeAllViews()
         val cand = Store.cleanDomain(webQuery) ?: if (webQuery.length >= 2 && !webQuery.contains('.') && !webQuery.contains(' ')) Store.cleanDomain("$webQuery.com") else null
         if (cand != null && cand !in sites) {
             val pv = LinearLayout(this).apply {
@@ -2328,7 +2338,7 @@ class MainActivity : Activity() {
                     refreshSites()
                 }
             }.apply { textSize = 13f; setPadding(dp(18), dp(9), dp(18), dp(9)) })
-            box.addView(pv, lp(matchP, wrapC).apply { bottomMargin = dp(10) })
+            pvb?.addView(pv, lp(matchP, wrapC))
         }
 
         if (sites.isEmpty()) {

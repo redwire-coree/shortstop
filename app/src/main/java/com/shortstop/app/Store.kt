@@ -316,7 +316,7 @@ object Store {
     data class Session(val start: Long, val minutes: Int, val tag: String, val done: Boolean)
     data class FocusSchedule(val id: String, val name: String, val start: Int, val end: Int, val days: Int, val on: Boolean)
 
-    val TAGS = listOf("Study", "Work", "Read", "Fitness", "Other")
+    val TAGS = listOf("Study", "Work", "Code", "Fitness", "Other")
 
     fun isLoved(c: Context, start: Long) = (p(c).getStringSet("loved", emptySet()) ?: emptySet()).contains(start.toString())
     fun lovedCount(c: Context) = (p(c).getStringSet("loved", emptySet()) ?: emptySet()).size
