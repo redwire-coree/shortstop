@@ -19,6 +19,7 @@ import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewParent
 import android.view.ViewGroup
 import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
@@ -1002,6 +1003,19 @@ class CurvedBar(
 
     override fun onMeasure(w: Int, h: Int) {
         super.onMeasure(w, MeasureSpec.makeMeasureSpec(barH + bend.toInt() + room, MeasureSpec.EXACTLY))
+    }
+
+    // The children are painted into an offscreen bitmap, so this view must redraw itself whenever a child changes
+    // (typed text, caret blink, the Block button fading in). Without this the bar showed stale pixels.
+    override fun onDescendantInvalidated(child: View, target: View) {
+        super.onDescendantInvalidated(child, target)
+        invalidate()
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun invalidateChildInParent(location: IntArray?, dirty: android.graphics.Rect?): ViewParent? {
+        invalidate()
+        return super.invalidateChildInParent(location, dirty)
     }
 
     private fun off(x: Float): Float {

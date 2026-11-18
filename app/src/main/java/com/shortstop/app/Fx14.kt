@@ -125,9 +125,9 @@ object TagColors {
 }
 
 /**
- * Port of react-bits PillNav (split layout, pill items, pill indicator, Ember highlight #FF5A1F, bounce 0.71,
- * stretch 0.5): raised pills on a glass bar, one orange pill glides to the tapped item with a stretching
- * two-edge spring, white labels ride inside it. Each idle tag keeps its small coloured dot.
+ * Port of react-bits PillNav (hoverEffect "fill", indicator "pill"): raised pills on a glass bar. The tapped pill
+ * fills with orange rising from its bottom edge in a circle while its label rolls up and a white copy rolls in;
+ * the previous pill drains back down. Orange is the same ember gradient as the Stats chart.
  */
 class TagPicker(
     ctx: Context, private val pal: Palette, private val fonts: Fonts,
@@ -135,113 +135,62 @@ class TagPicker(
 ) : View(ctx) {
     private val d = ctx.resources.displayMetrics.density
     private var sel = tags.indexOf(start).coerceAtLeast(0)
-    private var x0 = 0f; private var x1 = 0f; private var v0 = 0f; private var v1 = 0f
-    private var press = 1f; private var pressV = 0f; private var pressing = false
-    private var pop = 1f
-    private var ready = false
-    private var last = 0L
-    private val HI = Color.parseColor("#FF5A1F")
-    private val bounce = 0.71f
-    private val stretch = 0.5f
+    private val f = FloatArray(tags.size).also { it[sel] = 1f }
+    private val anims = arrayOfNulls<android.animation.ValueAnimator>(tags.size)
+    private val HI = Color.parseColor("#FFB27A")
+    private val LO = Color.parseColor("#FF6A2B")
     private val pad = 4f * d
     private val gap = 3f * d
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = fonts.medium; textAlign = Paint.Align.LEFT; textSize = 13f * d }
+    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = fonts.semi; textAlign = Paint.Align.CENTER; textSize = 14f * d }
     private val r = RectF()
     private val clip = Path()
     private var cell = 0f
+    private val easeIn = android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f)
+    private val easeOut = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
 
     init { isClickable = true }
 
     private fun t0(i: Int) = pad + i * (cell + gap)
-    private fun t1(i: Int) = t0(i) + cell
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
         cell = (w - pad * 2 - gap * (tags.size - 1)) / tags.size
-        x0 = t0(sel); x1 = t1(sel); v0 = 0f; v1 = 0f
-        ready = true
+    }
+
+    private fun run(i: Int, to: Float) {
+        anims[i]?.cancel()
+        val from = f[i]
+        anims[i] = android.animation.ValueAnimator.ofFloat(from, to).apply {
+            duration = if (to > from) 560 else 380
+            interpolator = if (to > from) easeIn else easeOut
+            addUpdateListener { f[i] = it.animatedValue as Float; invalidate() }
+            start()
+        }
     }
 
     fun select(i: Int) {
         if (i == sel) return
+        run(sel, 0f)
         sel = i
-        pop = 0.92f
+        run(i, 1f)
         performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
         onPick(tags[i])
-        last = 0L
-        postInvalidateOnAnimation()
     }
 
     override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
-        when (e.actionMasked) {
-            android.view.MotionEvent.ACTION_DOWN -> { pressing = true; last = 0L; postInvalidateOnAnimation(); parent?.requestDisallowInterceptTouchEvent(true) }
-            android.view.MotionEvent.ACTION_UP -> {
-                pressing = false
-                select(((e.x - pad) / (cell + gap)).toInt().coerceIn(0, tags.size - 1))
-                performClick()
-                last = 0L; postInvalidateOnAnimation()
-            }
-            android.view.MotionEvent.ACTION_CANCEL -> { pressing = false; last = 0L; postInvalidateOnAnimation() }
+        if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) parent?.requestDisallowInterceptTouchEvent(true)
+        if (e.actionMasked == android.view.MotionEvent.ACTION_UP) {
+            select(((e.x - pad) / (cell + gap)).toInt().coerceIn(0, tags.size - 1))
+            performClick()
         }
         return true
     }
 
-    /** Advances the springs; returns true while anything is still moving. */
-    private fun step(now: Long): Boolean {
-        val dt = if (last == 0L) 1f / 60f else minOf(0.05f, (now - last) / 1e9f)
-        last = now
-        val a = t0(sel); val b = t1(sel)
-        val dir = Math.signum((a + b) / 2f - (x0 + x1) / 2f)
-        val base = 520f
-        val lead = base * (1f + 0.9f * stretch)
-        val trail = base * (1f - 0.5f * stretch)
-        val k0 = if (dir < 0) lead else if (dir > 0) trail else base
-        val k1 = if (dir > 0) lead else if (dir < 0) trail else base
-        val zeta = 1f - 0.55f * bounce
-        val steps = Math.ceil((dt / (1f / 240f)).toDouble()).toInt().coerceAtLeast(1)
-        val h = dt / steps
-        for (i in 0 until steps) {
-            v0 += (-k0 * (x0 - a) - 2f * zeta * Math.sqrt(k0.toDouble()).toFloat() * v0) * h
-            x0 += v0 * h
-            v1 += (-k1 * (x1 - b) - 2f * zeta * Math.sqrt(k1.toDouble()).toFloat() * v1) * h
-            x1 += v1 * h
-        }
-        pop += (1f - pop) * (1f - Math.exp((-dt / 0.09f).toDouble()).toFloat())
-        val pt = if (pressing) 0.95f else 1f
-        pressV += (-700f * (press - pt) - 30f * pressV) * dt
-        press += pressV * dt
-        return Math.abs(x0 - a) > 0.05f || Math.abs(x1 - b) > 0.05f || Math.abs(v0) > 0.5f || Math.abs(v1) > 0.5f ||
-            Math.abs(1f - pop) > 0.001f || Math.abs(press - pt) > 0.0005f || Math.abs(pressV) > 0.01f
-    }
-
-    private fun label(c: Canvas, i: Int, color: Int, dotAlpha: Float) {
-        val h = height.toFloat()
-        val cx = (t0(i) + t1(i)) / 2f
-        val name = tags[i]
-        val tw = txt.measureText(name)
-        val dot = 2.1f * d
-        val dg = 5f * d
-        val total = tw + (dot * 2f + dg)
-        val left = cx - total / 2f
-        val ty = h / 2f - (txt.ascent() + txt.descent()) / 2f
-        if (dotAlpha > 0.01f) {
-            paint.style = Paint.Style.FILL
-            paint.color = TagColors.of(name)
-            paint.alpha = (255 * dotAlpha).toInt()
-            c.drawCircle(left + dot, h / 2f, dot, paint)
-            paint.alpha = 255
-        }
-        txt.color = color
-        c.drawText(name, left + dot * 2f + dg, ty, txt)
-    }
-
     override fun onDraw(c: Canvas) {
-        if (!ready) return
-        val moving = step(System.nanoTime())
+        if (cell <= 0f) return
         val w = width.toFloat(); val h = height.toFloat()
         val dark = pal.dark
-        // glass bar
         r.set(0.5f, 0.5f, w - 0.5f, h - 0.5f)
         paint.style = Paint.Style.FILL
         paint.color = if (dark) Color.argb(168, 38, 35, 46) else Color.argb(204, 240, 240, 243)
@@ -249,46 +198,44 @@ class TagPicker(
         paint.style = Paint.Style.STROKE; paint.strokeWidth = d
         paint.color = if (dark) Color.argb(20, 255, 255, 255) else Color.argb(18, 24, 24, 27)
         c.drawRoundRect(r, h / 2f, h / 2f, paint)
-        // raised item pills
+
         val ih = h - pad * 2f
         val strong = if (dark) Color.parseColor("#F4F4F5") else Color.parseColor("#18181B")
-        val pillL = x0; val pillR = x1
+        val roll = ih / 2f + 0.7f * txt.textSize
+        val reach = Math.sqrt(((cell / 2f) * (cell / 2f) + ih * ih).toDouble()).toFloat() + 2f * d
+        val ty0 = pad + ih / 2f - (txt.ascent() + txt.descent()) / 2f
         for (i in tags.indices) {
-            r.set(t0(i), pad, t1(i), pad + ih)
+            val l = t0(i); val rgt = l + cell
+            r.set(l, pad, rgt, pad + ih)
             paint.style = Paint.Style.FILL
             paint.shader = LinearGradient(0f, r.top, 0f, r.bottom,
                 if (dark) Color.parseColor("#3A3644") else Color.WHITE,
                 if (dark) Color.parseColor("#27242F") else Color.parseColor("#F6F6F8"), Shader.TileMode.CLAMP)
             c.drawRoundRect(r, ih / 2f, ih / 2f, paint)
             paint.shader = null
+            c.save()
+            clip.reset(); clip.addRoundRect(r, ih / 2f, ih / 2f, Path.Direction.CW)
+            c.clipPath(clip)
+            val fi = f[i]
+            if (fi > 0.001f) {
+                paint.shader = LinearGradient(0f, r.top, 0f, r.bottom, HI, LO, Shader.TileMode.CLAMP)
+                paint.alpha = 255
+                c.drawCircle((l + rgt) / 2f, r.bottom, reach * fi, paint)
+                paint.shader = null
+            }
+            val cx = (l + rgt) / 2f
+            txt.color = strong
+            c.drawText(tags[i], cx, ty0 - roll * fi, txt)
+            if (fi > 0.001f) {
+                txt.color = Color.WHITE
+                c.drawText(tags[i], cx, ty0 + roll * (1f - fi), txt)
+            }
+            c.restore()
             paint.style = Paint.Style.STROKE; paint.strokeWidth = d
             paint.color = if (dark) Color.argb(18, 255, 255, 255) else Color.argb(20, 24, 24, 27)
             r.inset(0.5f, 0.5f)
             c.drawRoundRect(r, ih / 2f, ih / 2f, paint)
-            val ov = (minOf(t1(i), pillR) - maxOf(t0(i), pillL)).coerceAtLeast(0f) / cell
-            label(c, i, strong, 1f - ov.coerceIn(0f, 1f))
         }
-        // gliding orange pill + the white labels riding inside it
-        val width = (x1 - x0).coerceAtLeast(0f)
-        val scale = press * pop
-        val squash = 1f - ((width / cell - 1f) * 0.3f).coerceIn(0f, 0.14f)
-        val cxp = (x0 + x1) / 2f; val cyp = pad + ih / 2f
-        val hw = width * scale / 2f; val hh = ih * scale * squash / 2f
-        r.set(cxp - hw, cyp - hh, cxp + hw, cyp + hh)
-        paint.style = Paint.Style.FILL
-        paint.color = Color.argb(46, 255, 90, 31)
-        r.inset(-d * 1.5f, -d * 1.5f)
-        c.drawRoundRect(r, hh + d, hh + d, paint)
-        r.inset(d * 1.5f, d * 1.5f)
-        paint.shader = LinearGradient(0f, r.top, 0f, r.bottom, mixColor(HI, Color.WHITE, 0.1f), HI, Shader.TileMode.CLAMP)
-        c.drawRoundRect(r, hh, hh, paint)
-        paint.shader = null
-        c.save()
-        clip.reset(); clip.addRoundRect(r, hh, hh, Path.Direction.CW)
-        c.clipPath(clip)
-        for (i in tags.indices) if (t1(i) > pillL - 2f && t0(i) < pillR + 2f) label(c, i, Color.WHITE, 0f)
-        c.restore()
-        if (moving) postInvalidateOnAnimation() else last = 0L
     }
 }
 
