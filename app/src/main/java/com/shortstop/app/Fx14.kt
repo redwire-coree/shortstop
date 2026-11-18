@@ -112,20 +112,103 @@ class SiteLogo(ctx: Context, private val domain: String, private val pal: Palett
     }
 }
 
-/** Focus-category colours: a green that sits on the warm palette, not a flat default green. */
+/** Focus-category colours: calm, slightly deepened tones that sit well on both themes. */
 object TagColors {
     fun of(tag: String): Int = Color.parseColor(when (tag) {
-        "Study" -> "#2E9E6B"
-        "Work" -> "#4763EB"
-        "Read" -> "#D08A2E"
-        "Fitness" -> "#E2574C"
-        else -> "#7C7C8A"
+        "Study" -> "#1F8A5B"
+        "Work" -> "#3B5BDB"
+        "Read" -> "#B7791F"
+        "Fitness" -> "#D9483B"
+        else -> "#6B7280"
     })
     fun deep(tag: String): Int = Color.parseColor(when (tag) {
-        "Study" -> "#0F3D2A"
-        "Work" -> "#14216B"
-        "Read" -> "#5A3A0A"
-        "Fitness" -> "#5E1410"
-        else -> "#262630"
+        "Study" -> "#0B3B27"
+        "Work" -> "#142369"
+        "Read" -> "#4A2F06"
+        "Fitness" -> "#561410"
+        else -> "#1F2430"
     })
+}
+
+/** One track, one pill that glides (spring) to the chosen tag and melts into its colour. */
+class TagPicker(
+    ctx: Context, private val pal: Palette, private val fonts: Fonts,
+    private val tags: List<String>, start: String, private val onPick: (String) -> Unit
+) : View(ctx) {
+    private var sel = tags.indexOf(start).coerceAtLeast(0)
+    private var pos = sel.toFloat()          // animated pill position in cells
+    private var color = TagColors.of(tags[sel])
+    private var pulse = 0f
+    private var anim: android.animation.ValueAnimator? = null
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val t = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = fonts.semi; textAlign = Paint.Align.CENTER; textSize = ctx.dpf(13f) }
+    private val r = RectF()
+    private val gap = ctx.dpf(4f)
+
+    init { isClickable = true }
+
+    fun select(i: Int) {
+        if (i == sel) return
+        val from = pos
+        val c0 = color
+        val c1 = TagColors.of(tags[i])
+        sel = i
+        anim?.cancel()
+        anim = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 520
+            interpolator = SpringInterpolator(10f, 0.72f, 0.52f)
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                pos = from + (i - from) * f
+                color = mixColor(c0, c1, f.coerceIn(0f, 1f))
+                pulse = kotlin.math.sin(Math.PI * it.animatedFraction.coerceIn(0f, 1f)).toFloat()
+                invalidate()
+            }
+            start()
+        }
+        performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+        onPick(tags[i])
+    }
+
+    override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+        if (e.actionMasked == android.view.MotionEvent.ACTION_UP) {
+            select((e.x / (width.toFloat() / tags.size)).toInt().coerceIn(0, tags.size - 1))
+            performClick()
+        }
+        return true
+    }
+
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat(); val h = height.toFloat()
+        val cell = w / tags.size
+        // track
+        r.set(1f, 1f, w - 1f, h - 1f)
+        p.style = Paint.Style.FILL; p.color = pal.surface
+        c.drawRoundRect(r, h / 2f, h / 2f, p)
+        p.style = Paint.Style.STROKE; p.strokeWidth = context.dpf(1f); p.color = pal.border
+        c.drawRoundRect(r, h / 2f, h / 2f, p)
+        // pill
+        val grow = pulse * context.dpf(2f)
+        r.set(pos * cell + gap - grow, gap - grow, (pos + 1) * cell - gap + grow, h - gap + grow)
+        p.style = Paint.Style.FILL
+        p.shader = LinearGradient(r.left, r.top, r.right, r.bottom, mixColor(color, Color.WHITE, 0.14f), mixColor(color, Color.BLACK, 0.12f), Shader.TileMode.CLAMP)
+        c.drawRoundRect(r, r.height() / 2f, r.height() / 2f, p)
+        p.shader = null
+        // labels
+        for (i in tags.indices) {
+            val near = (1f - kotlin.math.abs(pos - i)).coerceIn(0f, 1f)
+            val cx = (i + 0.5f) * cell
+            t.color = mixColor(pal.muted, Color.WHITE, near)
+            val ty = h / 2f - (t.ascent() + t.descent()) / 2f
+            val tw = t.measureText(tags[i])
+            val dot = context.dpf(3.2f) * (1f - near)
+            val off = (dot * 2f + context.dpf(5f)) * (1f - near) / 2f
+            if (dot > 0.2f) {
+                p.color = TagColors.of(tags[i]); p.alpha = (255 * (1f - near)).toInt()
+                c.drawCircle(cx - tw / 2f - off + dot - context.dpf(1f), h / 2f, dot, p)
+                p.alpha = 255
+            }
+            c.drawText(tags[i], cx + off, ty, t)
+        }
+    }
 }

@@ -1441,35 +1441,12 @@ class MainActivity : Activity() {
         box.addView(chipLine)
 
         box.addView(groupLabel("Tag").apply { setPadding(dp(4), dp(12), 0, dp(6)) })
-        val tagChips = ArrayList<TextView>()
-        val tagLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         lateinit var slide: SlideCommit
-        fun paintTag(ch: TextView, name: String, on: Boolean) {
-            val col = TagColors.of(name)
-            ch.setTextColor(if (on) Color.WHITE else col)
-            ch.background = round(if (on) col else mixColor(pal.canvas, col, 0.08f), 40, if (on) col else mixColor(pal.canvas, col, 0.45f), dp(1))
-        }
         fun tint() {
             slide.accent = mixColor(TagColors.of(tag), Color.WHITE, 0.5f)
             slide.deep = TagColors.deep(tag)
         }
-        Store.TAGS.forEachIndexed { i, name ->
-            val ch = pill(name, false) {}
-            ch.textSize = 12f
-            ch.setPadding(dp(2), dp(10), dp(2), dp(10))
-            ch.setOnClickListener {
-                tag = name
-                tagChips.forEachIndexed { j, c -> paintTag(c, Store.TAGS[j], Store.TAGS[j] == name) }
-                it.animate().cancel()
-                it.scaleX = 0.86f; it.scaleY = 0.86f
-                it.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(SpringInterpolator(14f, 0.55f, 0.5f)).start()
-                tint()
-            }
-            paintTag(ch, name, name == tag)
-            tagChips.add(ch)
-            tagLine.addView(ch, lp(0, wrapC, 1f).apply { if (i < Store.TAGS.size - 1) marginEnd = dp(5) })
-        }
-        box.addView(tagLine)
+        box.addView(TagPicker(this, pal, fonts, Store.TAGS, tag) { name -> tag = name; tint() }, lp(matchP, dp(46)))
 
         val opts = card()
         opts.addRow(toggleRow("Ultra Focus", "No quitting until it ends", strict) {
