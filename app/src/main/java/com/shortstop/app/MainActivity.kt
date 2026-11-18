@@ -148,7 +148,7 @@ class MainActivity : Activity() {
     /** False (with a short message) while strict mode is on: nothing may be switched off. */
     private fun free(): Boolean {
         if (!Store.frozen(this)) return true
-        toast("Strict mode: ${Store.focusLeftMin(this)} min left. Nothing can change until it ends.")
+        toast("Ultra Focus: ${Store.focusLeftMin(this)} min left")
         return false
     }
 
@@ -1025,19 +1025,19 @@ class MainActivity : Activity() {
 
         // While a session runs: today's numbers, what is being blocked, and your own reminder
         val extras = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
-        val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
         fun tile(label: String): Pair<View, TextView> {
             val t = card().apply { setPadding(dp(14), dp(16), dp(14), dp(16)); gravity = Gravity.CENTER_HORIZONTAL }
-            val v = tv("", 22f, fonts.bold, pal.ink, Gravity.CENTER).apply { letterSpacing = -0.02f }
+            val v = tv("", 20f, fonts.bold, pal.ink, Gravity.CENTER).apply { letterSpacing = -0.02f; setSingleLine(); minHeight = dp(28) }
             t.addView(v, lp(matchP, wrapC))
             t.addView(tv(label, 12f, fonts.medium, pal.muted, Gravity.CENTER).apply { setPadding(0, dp(6), 0, 0) }, lp(matchP, wrapC))
             return t to v
         }
         val (t1, v1) = tile("Today"); val (t2, v2) = tile("Streak"); val (t3, v3) = tile("Blocked")
         exToday = v1; exStreak = v2; exBlocked = v3
-        tiles.addView(t1, lp(0, wrapC, 1f).apply { marginEnd = dp(10) })
-        tiles.addView(t2, lp(0, wrapC, 1f).apply { marginEnd = dp(10) })
-        tiles.addView(t3, lp(0, wrapC, 1f))
+        tiles.addView(t1, lp(0, matchP, 1f).apply { marginEnd = dp(10) })
+        tiles.addView(t2, lp(0, matchP, 1f).apply { marginEnd = dp(10) })
+        tiles.addView(t3, lp(0, matchP, 1f))
         extras.addView(tiles, lp(matchP, wrapC).apply { topMargin = dp(14) })
         val blocking = card().apply { setPadding(dp(20), dp(16), dp(20), dp(8)) }
         blocking.addView(tv("Blocking now", 15f, fonts.semi, pal.ink).apply { setPadding(0, 0, 0, dp(10)) }, lp(matchP, wrapC))
@@ -1162,13 +1162,13 @@ class MainActivity : Activity() {
             runRing?.small = if (onBreak) "On break" else Store.focusTag(this).ifEmpty { "Focus" }
             runRing?.setSpan(start, end, onBreak)
             runInfo?.text = if (onBreak) "Break ends in ${clock(Store.breakUntil(this) - now)}. Blocks come back after."
-            else Store.breaksLeft(this).let { n -> "${if (n == 0) "No" else n.toString()} break${if (n == 1) "" else "s"} left." + (if (Store.focusStrict(this)) " Strict mode is on." else "") }
+            else Store.breaksLeft(this).let { n -> "${if (n == 0) "No" else n.toString()} break${if (n == 1) "" else "s"} left." + (if (Store.focusStrict(this)) " Ultra Focus is on." else "") }
             runBreakBtn?.let { b ->
                 b.visibility = if (!onBreak && Store.breaksLeft(this) == 0) View.GONE else View.VISIBLE
                 b.text = if (onBreak) "End break" else "Take a break"
             }
             runEndBtn?.let { b ->
-                b.text = if (Store.frozen(this)) "Strict mode" else "End session"
+                b.text = if (Store.frozen(this)) "Locked" else "End session"
                 b.alpha = if (Store.frozen(this)) 0.5f else 1f
             }
             runLattice?.running = !onBreak
@@ -1318,6 +1318,8 @@ class MainActivity : Activity() {
                     }
                     val mark = StatusMark(this, pal, 24f)
                     mark.setStatus(if (s.done) StatusMark.DONE else StatusMark.CANCELLED, true, idx * 70L)
+                    mark.isClickable = true
+                    mark.setOnClickListener { showSessionSheet(s) }
                     r.addView(mark, lp(wrapC, wrapC).apply { marginEnd = dp(12) })
                     val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
                     left.addView(tv(s.tag.ifEmpty { "Focus" }, 15f, fonts.medium, pal.ink).apply {
@@ -1441,38 +1443,53 @@ class MainActivity : Activity() {
         box.addView(groupLabel("Tag").apply { setPadding(dp(4), dp(12), 0, dp(6)) })
         val tagChips = ArrayList<TextView>()
         val tagLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        lateinit var slide: SlideCommit
+        fun paintTag(ch: TextView, name: String, on: Boolean) {
+            val col = TagColors.of(name)
+            ch.setTextColor(if (on) Color.WHITE else col)
+            ch.background = round(if (on) col else mixColor(pal.canvas, col, 0.08f), 40, if (on) col else mixColor(pal.canvas, col, 0.45f), dp(1))
+        }
+        fun tint() {
+            slide.accent = mixColor(TagColors.of(tag), Color.WHITE, 0.5f)
+            slide.deep = TagColors.deep(tag)
+        }
         Store.TAGS.forEachIndexed { i, name ->
-            val ch = pill(name, name == tag) {}
+            val ch = pill(name, false) {}
             ch.textSize = 12f
             ch.setPadding(dp(2), dp(10), dp(2), dp(10))
             ch.setOnClickListener {
                 tag = name
-                tagChips.forEachIndexed { j, c -> setPill(c, Store.TAGS[j] == name) }
+                tagChips.forEachIndexed { j, c -> paintTag(c, Store.TAGS[j], Store.TAGS[j] == name) }
+                it.animate().cancel()
+                it.scaleX = 0.86f; it.scaleY = 0.86f
+                it.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(SpringInterpolator(14f, 0.55f, 0.5f)).start()
+                tint()
             }
+            paintTag(ch, name, name == tag)
             tagChips.add(ch)
             tagLine.addView(ch, lp(0, wrapC, 1f).apply { if (i < Store.TAGS.size - 1) marginEnd = dp(5) })
         }
         box.addView(tagLine)
 
         val opts = card()
-        opts.addRow(toggleRow("Strict mode", "You can't quit until the timer ends", strict) {
+        opts.addRow(toggleRow("Ultra Focus", "No quitting until it ends", strict) {
             strict = it
             Store.setStrictDefault(this, it)
         })
         opts.addRow(stepperRow({ "Breaks: $it" }, breaks, 0, 10, 1) { breaks = it })
         opts.addRow(stepperRow({ "Break length: $it min" }, breakMin, 1, 30, 1) { breakMin = it })
-        opts.addRow(linkRow("Blocked during focus", "${Store.focusApps(this).size} app(s) selected") {
+        opts.addRow(linkRow("Blocked apps", "${Store.focusApps(this).size} selected") {
             Store.rememberSession(this, dur, tag, breaks, breakMin)
             closeSheet()
             openFocusApps()
         })
-        opts.addRow(linkRow("Ultra Focus settings", "Study mode, uninstall guard, notifications, home screen") {
+        opts.addRow(linkRow("More options", "Study mode, guards, home screen") {
             Store.rememberSession(this, dur, tag, breaks, breakMin)
             showUltraSheet { showStartSheet() }
         })
         box.addView(opts, lp(matchP, wrapC).apply { topMargin = dp(16) })
 
-        box.addView(SlideCommit(this, pal, fonts, "Slide to start", "Focus started", {
+        slide = SlideCommit(this, pal, fonts, "Slide to start", "Focus started", {
             if (!serviceOn()) {
                 toast("Turn on the Shortstop accessibility service first.")
                 open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -1486,23 +1503,63 @@ class MainActivity : Activity() {
             closeSheet()
             wasRunning = true
             updateRunning()
-        }, lp(matchP, wrapC).apply { topMargin = dp(16); bottomMargin = dp(4); gravity = Gravity.CENTER_HORIZONTAL })
+        }
+        tint()
+        box.addView(slide, lp(matchP, wrapC).apply { topMargin = dp(16); bottomMargin = dp(4); gravity = Gravity.CENTER_HORIZONTAL })
         showSheet("Start focus", box)
+    }
+
+    /** A shareable card for one focus session, with a slide to share in the card's own colour. */
+    private fun showSessionSheet(s: Store.Session) {
+        val tag = s.tag.ifEmpty { "Focus" }
+        val base = if (s.done) TagColors.of(s.tag) else Color.parseColor("#7C7C8A")
+        val df = SimpleDateFormat("EEE, d MMM · " + (if (DateFormat.is24HourFormat(this)) "HH:mm" else "h:mm a"), Locale.getDefault())
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(mixColor(base, Color.WHITE, 0.12f), mixColor(base, Color.BLACK, 0.28f))).apply { cornerRadius = dp(28).toFloat() }
+        }
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        top.addView(tv(tag.uppercase(), 12f, fonts.semi, Color.WHITE).apply { letterSpacing = 0.14f; alpha = 0.85f }, lp(0, wrapC, 1f))
+        top.addView(tv(if (s.done) "Completed" else "Ended early", 12f, fonts.semi, Color.WHITE, Gravity.CENTER).apply {
+            background = round(Color.argb(60, 255, 255, 255), 40)
+            setPadding(dp(12), dp(5), dp(12), dp(5))
+        })
+        card.addView(top, lp(matchP, wrapC))
+        card.addView(tv(fmtMin(s.minutes), 54f, fonts.bold, Color.WHITE).apply { letterSpacing = -0.03f; setPadding(0, dp(28), 0, 0) })
+        card.addView(tv("of focused time", 14f, fonts.regular, Color.WHITE).apply { alpha = 0.8f })
+        card.addView(tv(df.format(java.util.Date(s.start)), 13f, fonts.medium, Color.WHITE).apply { alpha = 0.8f; setPadding(0, dp(26), 0, 0) })
+        card.addView(tv("Shortstop", 13f, fonts.bold, Color.WHITE).apply { alpha = 0.55f; setPadding(0, dp(4), 0, 0) })
+        card.alpha = 0f; card.translationY = dp(16).toFloat(); card.scaleX = 0.96f; card.scaleY = 0.96f
+        card.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(SpringInterpolator(12f, 0.8f, 0.9f)).start()
+
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(card, lp(matchP, wrapC))
+        val slide = SlideCommit(this, pal, fonts, "Slide to share", "Sharing", { true }) {
+            val msg = if (s.done) "I focused for ${fmtMin(s.minutes)} on $tag with Shortstop." else "I focused for ${fmtMin(s.minutes)} on $tag with Shortstop."
+            val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, msg) }
+            closeSheet()
+            try { startActivity(Intent.createChooser(send, "Share your focus")) } catch (e: Exception) { }
+        }
+        slide.accent = mixColor(base, Color.WHITE, 0.5f)
+        slide.deep = mixColor(base, Color.BLACK, 0.6f)
+        box.addView(slide, lp(matchP, wrapC).apply { topMargin = dp(18); bottomMargin = dp(4) })
+        showSheet("Focus session", box)
     }
 
     private fun showUltraSheet(onClose: (() -> Unit)? = null) {
         val c = card()
-        c.addRow(toggleRow("Strict mode", "You cannot quit until the timer ends", Store.strictDefault(this)) { Store.setStrictDefault(this, it) })
-        c.addRow(toggleRow("YouTube Study Mode", "YouTube stays open, but Shorts and the home feed are blocked", Store.studyMode(this)) { Store.setStudyMode(this, it) })
-        c.addRow(toggleRow("Uninstall protection", "Keeps Settings away from Shortstop during focus", Store.uninstallGuard(this)) { Store.setUninstallGuard(this, it) })
-        c.addRow(toggleRow("Block notifications", "Hides notifications from your blocked apps", Store.blockNotifs(this)) {
+        c.addRow(toggleRow("Ultra Focus", "No quitting until it ends", Store.strictDefault(this)) { Store.setStrictDefault(this, it) })
+        c.addRow(toggleRow("YouTube Study Mode", "Only Shorts and the feed are blocked", Store.studyMode(this)) { Store.setStudyMode(this, it) })
+        c.addRow(toggleRow("Uninstall protection", "Blocks removal during focus", Store.uninstallGuard(this)) { Store.setUninstallGuard(this, it) })
+        c.addRow(toggleRow("Block notifications", "Hides alerts from blocked apps", Store.blockNotifs(this)) {
             Store.setBlockNotifs(this, it)
             if (it && !notifAccess()) {
                 toast("Switch on Notification access for Shortstop.")
                 open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
         })
-        c.addRow(toggleRow("Block home screen", "Covers the home screen with the focus timer", Store.blockHome(this)) { Store.setBlockHome(this, it) })
+        c.addRow(toggleRow("Block home screen", "Shows the timer instead", Store.blockHome(this)) { Store.setBlockHome(this, it) })
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         box.addView(c, lp(matchP, wrapC))
         box.addView(note("Uninstall protection makes removal harder, but it can't stop Android's own safe mode."))
@@ -1887,6 +1944,8 @@ class MainActivity : Activity() {
     private var appAdapter: BaseAdapter? = null
     private var loadingText: TextView? = null
     private var sitesBox: LinearLayout? = null
+    private var webQuery = ""
+    private var sitesInput: EditText? = null
     private var appHint: TextView? = null
 
     private fun iconBitmap(d: Drawable): Bitmap {
@@ -2203,6 +2262,8 @@ class MainActivity : Activity() {
         }
         val curved = CurvedBar(this, pal, fonts, "reddit.com", "Block") { addSite() }
         urlInput = curved.edit
+        sitesInput = urlInput
+        watch(urlInput) { webQuery = it.trim().lowercase().removePrefix("https://").removePrefix("http://").removePrefix("www."); refreshSites() }
         addRow.addView(curved, lp(matchP, wrapC))
         webCol.addView(addRow)
 
@@ -2242,18 +2303,55 @@ class MainActivity : Activity() {
         suggestBox?.let { sug ->
             sug.removeAllViews()
             val popular = listOf("instagram.com", "youtube.com", "x.com", "reddit.com", "facebook.com", "tiktok.com", "netflix.com", "twitch.tv", "snapchat.com", "pinterest.com")
-            val left = popular.filter { it !in sites }
+            val q = webQuery.substringBefore('/')
+            val left = popular.filter { it !in sites && (q.isEmpty() || it.contains(q)) }
             left.forEachIndexed { i, dom ->
-                val chip = pill(dom, false) {
-                    if (free()) {
-                        lastAddedSite = dom
-                        Store.addSite(this, dom)
-                        refreshSites()
+                val chip = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    background = round(pal.surface, 40, pal.border, dp(1))
+                    setPadding(dp(8), dp(7), dp(16), dp(7))
+                    isClickable = true
+                    press(this)
+                    setOnClickListener {
+                        if (free()) {
+                            lastAddedSite = dom
+                            Store.addSite(this@MainActivity, dom)
+                            refreshSites()
+                        }
                     }
-                }.apply { textSize = 13f; setPadding(dp(16), dp(10), dp(16), dp(10)) }
+                }
+                chip.addView(SiteLogo(this, dom, pal, fonts), lp(dp(26), dp(26)).apply { marginEnd = dp(8) })
+                chip.addView(tv(dom, 13f, fonts.semi, pal.ink))
                 sug.addView(chip, lp(wrapC, wrapC).apply { if (i < left.size - 1) marginEnd = dp(8) })
             }
             (sug.parent as? View)?.visibility = if (left.isEmpty()) View.GONE else View.VISIBLE
+        }
+
+        // live preview while typing: what will be blocked, with its logo
+        val cand = Store.cleanDomain(webQuery) ?: if (webQuery.length >= 2 && !webQuery.contains('.') && !webQuery.contains(' ')) Store.cleanDomain("$webQuery.com") else null
+        if (cand != null && cand !in sites) {
+            val pv = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = round(pal.canvas, 24, pal.ink, dp(2))
+                setPadding(dp(14), dp(12), dp(12), dp(12))
+            }
+            pv.addView(SiteLogo(this, cand, pal, fonts), lp(dp(40), dp(40)).apply { marginEnd = dp(14) })
+            val pt = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            pt.addView(tv(cand, 16f, fonts.semi, pal.ink))
+            pt.addView(tv("Tap Block to add", 12f, fonts.regular, pal.muted).apply { setPadding(0, dp(2), 0, 0) })
+            pv.addView(pt, lp(0, wrapC, 1f))
+            pv.addView(pill("Block", true) {
+                if (free()) {
+                    lastAddedSite = cand
+                    Store.addSite(this, cand)
+                    webQuery = ""
+                    sitesInput?.setText("")
+                    refreshSites()
+                }
+            }.apply { textSize = 13f; setPadding(dp(18), dp(9), dp(18), dp(9)) })
+            box.addView(pv, lp(matchP, wrapC).apply { bottomMargin = dp(10) })
         }
 
         if (sites.isEmpty()) {
@@ -2268,9 +2366,7 @@ class MainActivity : Activity() {
                 background = round(pal.surface, 24, pal.border, dp(1))
                 setPadding(dp(14), dp(12), dp(12), dp(12))
             }
-            row.addView(tv(d.first().uppercaseChar().toString(), 16f, fonts.bold, pal.canvas, Gravity.CENTER).apply {
-                background = round(pal.ink, 14)
-            }, lp(dp(40), dp(40)).apply { marginEnd = dp(14) })
+            row.addView(SiteLogo(this, d, pal, fonts), lp(dp(40), dp(40)).apply { marginEnd = dp(14) })
             val txt = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             txt.addView(tv(d, 16f, fonts.semi, pal.ink))
             txt.addView(tv("Blocked in all browsers", 12f, fonts.regular, pal.muted).apply { setPadding(0, dp(2), 0, 0) })
@@ -2662,7 +2758,7 @@ class MainActivity : Activity() {
         // Ultra Focus
         col.addView(sectionTitle("Focus"))
         val focus = card()
-        focus.addRow(linkRow("Ultra Focus settings", "Strict mode, study mode, uninstall guard, notifications, home screen") { showUltraSheet() })
+        focus.addRow(linkRow("Ultra Focus", "Lock, study mode, guards, notifications") { showUltraSheet() })
         focus.addRow(linkRow("Daily focus goal", fmtMin(Store.goalMin(this))) { showGoalSheet() })
         col.addView(focus, lp(matchP, wrapC))
 

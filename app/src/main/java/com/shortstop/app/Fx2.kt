@@ -234,6 +234,11 @@ class SlideCommit(
     private var doneT = 0f
     private var spin = 0f
     private var checkT = 0f
+    /** Colour the track turns when armed and the finish fills with (green by default). */
+    var accent: Int = SLIDE_GREEN
+        set(v) { field = v; greenP.color = v; invalidate() }
+    var deep: Int = SLIDE_DEEP
+        set(v) { field = v; checkP.color = v; invalidate() }
     private val greenP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SLIDE_GREEN }
     private val checkP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = SLIDE_DEEP; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; strokeWidth = ctx.dpf(2.6f)
@@ -301,7 +306,7 @@ class SlideCommit(
         c.clipPath(clip)
         if (phase < 2 && pos > 0f) {
             // the wash behind the handle turns light green once you are far enough to let go
-            wipeP.color = mixColor(mixColor(pal.surface, pal.ink, 0.06f + 0.12f * pos.coerceIn(0f, 1f)), SLIDE_GREEN, armT)
+            wipeP.color = mixColor(mixColor(pal.surface, pal.ink, 0.06f + 0.12f * pos.coerceIn(0f, 1f)), accent, armT)
             c.drawRect(0f, 0f, cxh, h, wipeP)
         }
         if (doneT > 0.005f) {
@@ -334,7 +339,7 @@ class SlideCommit(
         }
         if (doneT > 0.01f) {
             val la = ((doneT - 0.35f) / 0.65f).coerceIn(0f, 1f)
-            txt.color = SLIDE_DEEP
+            txt.color = deep
             txt.alpha = (255 * la).toInt()
             val lx = w / 2f + context.dpf(14f)
             c.drawText(doneLabel, lx, cy, txt)
