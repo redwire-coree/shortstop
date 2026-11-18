@@ -13,7 +13,7 @@ import kotlin.math.*
  * softness 0.6, linger 1, contain, duotone, 2 levels, contrast 1.15, brightness 0, rim 0, click burst on.
  * The photo is assets/dither.png.
  */
-class DitherVeil(ctx: Context, private val dark: Boolean) : View(ctx) {
+class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor: Int) : View(ctx) {
     private val d = ctx.resources.displayMetrics.density
     private val cell = max(1, (2f * d).roundToInt())
     private val reveal = 200f * d
@@ -39,6 +39,14 @@ class DitherVeil(ctx: Context, private val dark: Boolean) : View(ctx) {
     private val veilPaint = Paint().apply { isFilterBitmap = false; isAntiAlias = false }
     private val dst = RectF()
     private val src2 = Rect()
+
+    // soft feathered edges (page colour) and the upward "gradual blur" exit
+    private val fadeP = Paint()
+    private var fTop: Shader? = null; private var fBot: Shader? = null; private var fL: Shader? = null; private var fR: Shader? = null
+    private var away = -1f
+    private var snap: Bitmap? = null; private var blur1: Bitmap? = null; private var blur2: Bitmap? = null
+    private val maskP = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
+    private val bmpP = Paint(Paint.FILTER_BITMAP_FLAG)
 
     private var presence = 0f
     private var inside = false
@@ -152,6 +160,11 @@ class DitherVeil(ctx: Context, private val dark: Boolean) : View(ctx) {
         introStart = SystemClock.uptimeMillis()
         last = introStart
         px = w / 2f; py = h / 2f
+        val clear = edgeColor and 0x00FFFFFF
+        fTop = LinearGradient(0f, 0f, 0f, h * 0.45f, edgeColor, clear, Shader.TileMode.CLAMP)
+        fBot = LinearGradient(0f, h.toFloat(), 0f, h * 0.78f, edgeColor, clear, Shader.TileMode.CLAMP)
+        fL = LinearGradient(0f, 0f, w * 0.16f, 0f, edgeColor, clear, Shader.TileMode.CLAMP)
+        fR = LinearGradient(w.toFloat(), 0f, w * 0.84f, 0f, edgeColor, clear, Shader.TileMode.CLAMP)
         compose(0f, 0)
         postInvalidateOnAnimation()
     }
@@ -223,24 +236,96 @@ class DitherVeil(ctx: Context, private val dark: Boolean) : View(ctx) {
         lx = bx; ly = by
     }
 
-    override fun onDraw(c: Canvas) {
+    private fun drawScene(c: Canvas) {
         val lay = layer ?: return
         val v = veil ?: return
-        val now = SystemClock.uptimeMillis()
-        val intro = min(1f, (now - introStart) / 1100f)
-        step(now)
-        for (i in bursts.indices.reversed()) if (now - burstStart[i] > 1200) { bursts.removeAt(i); burstStart.removeAt(i) }
-        compose(intro, now)
         c.drawBitmap(lay, 0f, 0f, null)
         c.save()
         c.scale(cell.toFloat(), cell.toFloat())
         c.drawBitmap(v, 0f, 0f, veilPaint)
         c.restore()
+    }
+
+    private fun drawFade(c: Canvas) {
+        val w = width.toFloat(); val h = height.toFloat()
+        fadeP.shader = fTop; c.drawRect(0f, 0f, w, h * 0.45f, fadeP)
+        fadeP.shader = fBot; c.drawRect(0f, h * 0.78f, w, h, fadeP)
+        fadeP.shader = fL; c.drawRect(0f, 0f, w * 0.16f, h, fadeP)
+        fadeP.shader = fR; c.drawRect(w * 0.84f, 0f, w, h, fadeP)
+    }
+
+    private fun blurred(src: Bitmap, f: Int): Bitmap {
+        val w = src.width; val h = src.height
+        var cur = Bitmap.createScaledBitmap(src, max(1, w / 2), max(1, h / 2), true)
+        var k = 2
+        while (k < f) { k *= 2; cur = Bitmap.createScaledBitmap(cur, max(1, w / k), max(1, h / k), true) }
+        while (k > 1) { k /= 2; cur = Bitmap.createScaledBitmap(cur, max(1, w / k), max(1, h / k), true) }
+        return cur
+    }
+
+    /** Tapping + : the photo blurs upward (a gradual blur front rising from the bottom), lifts and fades, then onDone. */
+    fun playAway(onDone: () -> Unit) {
+        if (away >= 0f || layer == null || width <= 0) { onDone(); return }
+        val sn = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        drawScene(Canvas(sn))
+        snap = sn
+        blur1 = blurred(sn, 8)
+        blur2 = blurred(sn, 32)
+        away = 0f
+        android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 760
+            interpolator = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
+            addUpdateListener { away = it.animatedValue as Float; invalidate() }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator) { onDone() }
+            })
+            start()
+        }
+    }
+
+    private fun maskedBlur(c: Canvas, b: Bitmap, front: Float, soft: Float) {
+        val w = width.toFloat(); val h = height.toFloat()
+        c.saveLayer(0f, 0f, w, h, null)
+        c.drawBitmap(b, null, RectF(0f, 0f, w, h), bmpP)
+        maskP.shader = LinearGradient(0f, front - soft, 0f, front + soft, 0x00000000, -0x1000000, Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w, h, maskP)
+        c.restore()
+    }
+
+    private fun drawAway(c: Canvas) {
+        val sn = snap ?: return
+        val p = away
+        val w = width.toFloat(); val h = height.toFloat()
+        val soft = h * 0.3f
+        val front = h + soft - (h + 2f * soft) * p
+        val t = ((p - 0.55f) / 0.45f).coerceIn(0f, 1f)
+        val alpha = ((1f - t * t * (3f - 2f * t)) * 255).toInt()
+        c.save()
+        c.translate(0f, -28f * d * p)
+        c.saveLayerAlpha(0f, 0f, w, h, alpha)
+        c.drawBitmap(sn, 0f, 0f, null)
+        blur1?.let { maskedBlur(c, it, front, soft) }
+        blur2?.let { maskedBlur(c, it, front + 0.12f * h, soft) }
+        c.restore()
+        c.restore()
+    }
+
+    override fun onDraw(c: Canvas) {
+        if (away >= 0f) { drawAway(c); drawFade(c); return }
+        if (layer == null || veil == null) return
+        val now = SystemClock.uptimeMillis()
+        val intro = min(1f, (now - introStart) / 1100f)
+        step(now)
+        for (i in bursts.indices.reversed()) if (now - burstStart[i] > 1200) { bursts.removeAt(i); burstStart.removeAt(i) }
+        compose(intro, now)
+        drawScene(c)
+        drawFade(c)
         val busy = inside || presence > 0.002f || bursts.isNotEmpty() || now < trailUntil || intro < 1f
         if (busy && isShown) postInvalidateOnAnimation()
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (away >= 0f) return true
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
@@ -260,5 +345,6 @@ class DitherVeil(ctx: Context, private val dark: Boolean) : View(ctx) {
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         layer?.recycle(); veil?.recycle(); layer = null; veil = null
+        snap?.recycle(); blur1?.recycle(); blur2?.recycle(); snap = null; blur1 = null; blur2 = null
     }
 }

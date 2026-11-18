@@ -500,6 +500,14 @@ class MainActivity : Activity() {
         return row
     }
 
+    /** Centred − / + button (drawn, so the symbol is always dead-centre). */
+    private fun stepBtn(plus: Boolean, onClick: () -> Unit): View =
+        GlyphBtn(this, plus, pal.canvas, pal.ink, pal.border, false).apply {
+            setOnClickListener { onClick() }
+            press(this)
+            layoutParams = LinearLayout.LayoutParams(dp(46), dp(38))
+        }
+
     private fun smallBtn(t: String, onClick: () -> Unit): TextView =
         pill(t, false, onClick).apply { textSize = 16f; setPadding(dp(16), dp(7), dp(16), dp(7)) }
 
@@ -521,8 +529,8 @@ class MainActivity : Activity() {
             cap.text = caption(v)
         }
         row.addView(cap, lp(0, wrapC, 1f))
-        row.addView(smallBtn("−") { change(-step) })
-        row.addView(smallBtn("+") { change(step) }, lp(wrapC, wrapC).apply { marginStart = dp(8) })
+        row.addView(stepBtn(false) { change(-step) })
+        row.addView(stepBtn(true) { change(step) }, lp(dp(46), dp(38)).apply { marginStart = dp(8) })
         return row
     }
 
@@ -1398,8 +1406,8 @@ class MainActivity : Activity() {
         val big = display(fmtMin(g), 44f)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         row.addView(big, lp(0, wrapC, 1f))
-        row.addView(smallBtn("−") { g = (g - 30).coerceAtLeast(30); big.text = fmtMin(g) })
-        row.addView(smallBtn("+") { g = (g + 30).coerceAtMost(960); big.text = fmtMin(g) }, lp(wrapC, wrapC).apply { marginStart = dp(8) })
+        row.addView(stepBtn(false) { g = (g - 30).coerceAtLeast(30); big.text = fmtMin(g) })
+        row.addView(stepBtn(true) { g = (g + 30).coerceAtMost(960); big.text = fmtMin(g) }, lp(dp(46), dp(38)).apply { marginStart = dp(8) })
         box.addView(row)
         box.addView(tv("How much focus time you want each day.", 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(8), 0, dp(18)) })
         box.addView(pill("Save", true) {
@@ -1430,8 +1438,8 @@ class MainActivity : Activity() {
         }
         val durRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         durRow.addView(durText, lp(0, wrapC, 1f))
-        durRow.addView(smallBtn("−") { setDur(dur - 5) })
-        durRow.addView(smallBtn("+") { setDur(dur + 5) }, lp(wrapC, wrapC).apply { marginStart = dp(8) })
+        durRow.addView(stepBtn(false) { setDur(dur - 5) })
+        durRow.addView(stepBtn(true) { setDur(dur + 5) }, lp(dp(46), dp(38)).apply { marginStart = dp(8) })
         box.addView(durRow)
         val chipLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, dp(4)) }
         presets.forEachIndexed { i, v ->
@@ -1707,7 +1715,8 @@ class MainActivity : Activity() {
     private fun fillScheduleEmpty(list: LinearLayout) {
         val screenW = resources.displayMetrics.widthPixels
         // Dither Veil: burn through the 1-bit photo with a finger
-        list.addView(DitherVeil(this, pal.dark), lp(matchP, dp(250)).apply { topMargin = dp(40) })
+        val veil = DitherVeil(this, pal.dark, pal.canvas)
+        list.addView(veil, lp(matchP, dp(250)).apply { topMargin = dp(40) })
         list.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(14), dp(8), dp(22))
@@ -1731,16 +1740,18 @@ class MainActivity : Activity() {
             lc.addView(tv(n, 15f, fonts.semi, pal.ink))
             lc.addView(tv("${fmt12(st)} – ${fmt12(en)}  ·  ${daysLabel(31)}", 12f, fonts.regular, pal.muted).apply { setPadding(0, dp(3), 0, 0) })
             c.addView(lc, lp(0, wrapC, 1f).apply { marginEnd = dp(10) })
-            val add = tv("+", 20f, fonts.regular, pal.canvas, Gravity.CENTER).apply {
-                includeFontPadding = false
-                background = round(pal.ink, 40)
-                isClickable = true
+            var busy = false
+            val add = GlyphBtn(this, true, pal.ink, pal.canvas, 0, true).apply {
                 setOnClickListener {
-                    Store.saveSchedules(this@MainActivity, Store.schedules(this@MainActivity) +
-                        Store.FocusSchedule(System.currentTimeMillis().toString() + i, n, st, en, 31, true))
-                    fillSchedules()
-                    refreshStatus()
-                    toast("$n added")
+                    if (busy) return@setOnClickListener
+                    busy = true
+                    veil.playAway {
+                        Store.saveSchedules(this@MainActivity, Store.schedules(this@MainActivity) +
+                            Store.FocusSchedule(System.currentTimeMillis().toString() + i, n, st, en, 31, true))
+                        fillSchedules()
+                        refreshStatus()
+                        toast("$n added")
+                    }
                 }
                 press(this)
             }

@@ -270,3 +270,24 @@ class FlowLayout(ctx: Context, private val hGap: Int, private val vGap: Int) : a
 }
 
 private fun Context.dpf(v: Float) = v * resources.displayMetrics.density
+
+/** A +, − or round "+" drawn from lines so the glyph is exactly centred (text glyphs sit off-centre in their box). */
+class GlyphBtn(ctx: Context, private val plus: Boolean, private val bg: Int, private val fg: Int, private val stroke: Int, private val round: Boolean) : View(ctx) {
+    private val d = ctx.resources.displayMetrics.density
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val r = RectF()
+    init { isClickable = true }
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat(); val h = height.toFloat()
+        r.set(0.5f * d, 0.5f * d, w - 0.5f * d, h - 0.5f * d)
+        p.style = Paint.Style.FILL; p.color = bg
+        c.drawRoundRect(r, h / 2f, h / 2f, p)
+        if (stroke != 0) { p.style = Paint.Style.STROKE; p.strokeWidth = d; p.color = stroke; c.drawRoundRect(r, h / 2f, h / 2f, p) }
+        p.style = Paint.Style.STROKE; p.color = fg; p.strokeWidth = 2f * d; p.strokeCap = Paint.Cap.ROUND
+        val cx = w / 2f; val cy = h / 2f
+        val a = (if (round) 0.26f else 0.2f) * minOf(w, h * 1.4f)
+        val arm = minOf(a, 7f * d)
+        c.drawLine(cx - arm, cy, cx + arm, cy, p)
+        if (plus) c.drawLine(cx, cy - arm, cx, cy + arm, p)
+    }
+}
