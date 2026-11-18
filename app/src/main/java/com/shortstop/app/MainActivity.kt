@@ -556,6 +556,7 @@ class MainActivity : Activity() {
     private fun buildAll() {
         pal = Palette(this)
         window.statusBarColor = pal.canvas
+        statusNow = pal.canvas
         window.navigationBarColor = pal.canvas
         window.setBackgroundDrawable(ColorDrawable(pal.canvas))
         var flags = window.decorView.systemUiVisibility
@@ -614,6 +615,24 @@ class MainActivity : Activity() {
         gooey?.select(tab, true)
     }
 
+    private var statusAnim: ValueAnimator? = null
+    private var statusNow = 0
+
+    /** The status bar takes the paper colour while the empty Schedule shows the veil, so they read as one surface. */
+    private fun updateStatusBar(forceCanvas: Boolean = false) {
+        val paperOn = !forceCanvas && !pal.dark && tab == 1 && Store.schedules(this).isEmpty()
+        val to = if (paperOn) Color.parseColor("#F4F1EA") else pal.canvas
+        if (statusNow == 0) statusNow = window.statusBarColor
+        if (to == statusNow) return
+        statusAnim?.cancel()
+        val from = statusNow
+        statusAnim = ValueAnimator.ofObject(android.animation.ArgbEvaluator(), from, to).apply {
+            duration = 320
+            addUpdateListener { statusNow = it.animatedValue as Int; window.statusBarColor = statusNow }
+            start()
+        }
+    }
+
     private fun selectTab(i: Int) {
         if (i == tab) return
         val old = pages[tab]
@@ -635,6 +654,7 @@ class MainActivity : Activity() {
         nw.animate().alpha(1f).translationX(0f).setDuration(520).setInterpolator(SpringInterpolator(15f, 0.75f, 0.9f)).withLayer().start()
         stagger(nw)
         styleNav()
+        updateStatusBar()
     }
 
     private val stagAnims = ArrayList<ValueAnimator>()
@@ -1566,7 +1586,7 @@ class MainActivity : Activity() {
 
     private fun schedulePage(): View {
         val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val col = column()
+        val col = column().apply { clipToPadding = false }
         val sTitle = display("Schedule", 30f)
         schedPageTitle = sTitle
         col.addView(sTitle)
@@ -1667,6 +1687,7 @@ class MainActivity : Activity() {
         val items = Store.schedules(this)
         val vis = if (items.isEmpty()) View.GONE else View.VISIBLE
         schedIntro?.visibility = vis
+        updateStatusBar()
         schedPageTitle?.visibility = vis
         schedHeadCard?.visibility = vis
         if (items.isEmpty()) { fillScheduleEmpty(list); return }
@@ -1717,10 +1738,10 @@ class MainActivity : Activity() {
         val screenW = resources.displayMetrics.widthPixels
         // Dither Veil: burn through the 1-bit photo with a finger
         val veil = DitherVeil(this, pal.dark, pal.canvas)
-        content.addView(veil, lp(matchP, dp(250)).apply { topMargin = dp(40) })
+        content.addView(veil, lp(matchP, dp(330)).apply { topMargin = -dp(20); marginStart = -dp(20); marginEnd = -dp(20) })
         content.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(8), dp(14), dp(8), dp(22))
+            setPadding(dp(8), dp(2), dp(8), dp(22))
         }, lp(matchP, wrapC))
         val templates = listOf(
             Triple("Morning Study", 6 * 60, 8 * 60),
@@ -1748,6 +1769,7 @@ class MainActivity : Activity() {
                     busy = true
                     val bmp = Bitmap.createBitmap(content.width, content.height, Bitmap.Config.ARGB_8888)
                     content.draw(Canvas(bmp))
+                    updateStatusBar(true)
                     blurView.visibility = View.VISIBLE
                     content.visibility = View.INVISIBLE
                     blurView.start(bmp) {
@@ -1756,6 +1778,7 @@ class MainActivity : Activity() {
                         fillSchedules()
                         refreshStatus()
                         toast("$n added")
+                        schedCol?.let { col -> for (k in 0 until col.childCount) popIn(col.getChildAt(k), 60L + k * 70L) }
                     }
                 }
                 press(this)

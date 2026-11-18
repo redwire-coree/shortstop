@@ -16,8 +16,7 @@ import kotlin.math.max
 class UpwardBlurView(ctx: Context) : View(ctx) {
     private val d = ctx.resources.displayMetrics.density
     private var snap: Bitmap? = null
-    private var b1: Bitmap? = null
-    private var b2: Bitmap? = null
+    private var layers: List<Bitmap> = emptyList()
     private var p = 0f
     private val maskP = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
     private val bmpP = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -37,12 +36,11 @@ class UpwardBlurView(ctx: Context) : View(ctx) {
         p = 0f
         invalidate()
         pool.execute {
-            val a = blurred(snapshot, 8)
-            val b = blurred(snapshot, 32)
+            val made = listOf(6, 16, 40, 96).map { blurred(snapshot, it) }
             ui.post {
-                b1 = a; b2 = b
+                layers = made
                 android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-                    duration = 820
+                    duration = 980
                     interpolator = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
                     addUpdateListener { p = it.animatedValue as Float; invalidate() }
                     addListener(object : android.animation.AnimatorListenerAdapter() {
@@ -69,22 +67,22 @@ class UpwardBlurView(ctx: Context) : View(ctx) {
         val w = width.toFloat(); val h = height.toFloat()
         val soft = h * 0.28f
         val front = h + soft - (h + 2f * soft) * p
-        val t = ((p - 0.6f) / 0.4f).coerceIn(0f, 1f)
+        val t = ((p - 0.5f) / 0.5f).coerceIn(0f, 1f)
         val alpha = ((1f - t * t * (3f - 2f * t)) * 255).toInt()
         c.save()
         c.translate(0f, -34f * d * p)
         c.saveLayerAlpha(0f, 0f, w, h, alpha)
         dst.set(0f, 0f, w, h)
         c.drawBitmap(sn, null, dst, bmpP)
-        b1?.let { layerMasked(c, it, front, soft) }
-        b2?.let { layerMasked(c, it, front + 0.12f * h, soft) }
+        // strongest blur nearest the bottom edge, easing off upward: a smooth gradual-blur ramp
+        layers.forEachIndexed { i, b -> layerMasked(c, b, front + i * 0.1f * h, soft) }
         c.restore()
         c.restore()
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        snap = null; b1 = null; b2 = null
+        snap = null; layers = emptyList()
     }
 
     companion object {

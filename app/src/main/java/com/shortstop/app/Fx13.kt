@@ -80,9 +80,11 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
         val bmp = src ?: return
         if (w <= 0 || h <= 0) return
         // contain-fit rect
-        val s = min(w / bmp.width.toFloat(), h / bmp.height.toFloat())
+        // the photo lives in the upper 80%; the bottom 20% is the paper-to-page gradient
+        val regionH = h * 0.80f
+        val s = min(w / bmp.width.toFloat(), regionH / bmp.height.toFloat()) * 0.94f
         val iw = bmp.width * s; val ih = bmp.height * s
-        dst.set((w - iw) / 2f, (h - ih) / 2f, (w + iw) / 2f, (h + ih) / 2f)
+        dst.set((w - iw) / 2f, (regionH - ih) / 2f, (w + iw) / 2f, (regionH + ih) / 2f)
 
         // edge colour -> matte, plain background detection
         val small = Bitmap.createScaledBitmap(bmp, 32, 32, true)
@@ -98,7 +100,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
         val spread = (sqrt(max(0f, sq[0] / n - mr * mr)) + sqrt(max(0f, sq[1] / n - mg * mg)) + sqrt(max(0f, sq[2] / n - mb * mb))) / 3f
         key = spread < 0.06f
         val matte = Color.rgb((mr * 255).roundToInt(), (mg * 255).roundToInt(), (mb * 255).roundToInt())
-        val backdrop = edgeColor   // plain background IS the page colour: no box, no fade needed
+        val backdrop = mix(ink, paper, toned(lum(matte)))
 
         // full-colour layer: backdrop + photo (near-matte pixels melt into the backdrop)
         val lw = w; val lh = h
@@ -145,10 +147,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
                 val err = old - q
                 val inImg = (x + 0.5f) * cell >= dst.left && (x + 0.5f) * cell <= dst.right &&
                     (y + 0.5f) * cell >= dst.top && (y + 0.5f) * cell <= dst.bottom
-                val sc0 = sp[p]
-                val dr0 = Color.red(sc0) / 255f - mr; val dg0 = Color.green(sc0) / 255f - mg; val db0 = Color.blue(sc0) / 255f - mb
-                val plainCell = key && sqrt(dr0 * dr0 + dg0 * dg0 + db0 * db0) < 0.07f
-                base[p] = if (plainCell) edgeColor else if (inImg || key) mix(ink, paper, q) else ink
+                base[p] = if (inImg || key) mix(ink, paper, q) else ink
                 fun add(dx: Int, dy: Int, k: Float) {
                     val nx = x + dx * dir; val ny = y + dy
                     if (nx < 0 || nx >= cols || ny >= rows) return
@@ -165,7 +164,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
         px = w / 2f; py = h / 2f
         val clear = edgeColor and 0x00FFFFFF
         fTop = LinearGradient(0f, 0f, 0f, h * 0.45f, edgeColor, clear, Shader.TileMode.CLAMP)
-        fBot = LinearGradient(0f, h.toFloat(), 0f, h * 0.78f, edgeColor, clear, Shader.TileMode.CLAMP)
+        fBot = LinearGradient(0f, h * 0.80f, 0f, h * 0.99f, paper, edgeColor, Shader.TileMode.CLAMP)
         fL = LinearGradient(0f, 0f, w * 0.16f, 0f, edgeColor, clear, Shader.TileMode.CLAMP)
         fR = LinearGradient(w.toFloat(), 0f, w * 0.84f, 0f, edgeColor, clear, Shader.TileMode.CLAMP)
         compose(0f, 0)
@@ -201,7 +200,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
                 if (introEase < 1f) {
                     val ux = (cx / width - 0.5f) * aspectX; val uy = cy / height - 0.5f
                     val spread = hypot(ux, uy) / hypot(aspectX * 0.5f, 0.5f)
-                    if (spread * 0.72f + bayer(x + 3, y + 5) * 0.28f > introEase * 1.001f) out = edgeColor
+                    if (spread * 0.72f + bayer(x + 3, y + 5) * 0.28f > introEase * 1.001f) out = paper
                 }
                 pix[p] = out
             }
@@ -251,10 +250,8 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
 
     private fun drawFade(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat()
-        fadeP.shader = fTop; c.drawRect(0f, 0f, w, h * 0.45f, fadeP)
-        fadeP.shader = fBot; c.drawRect(0f, h * 0.78f, w, h, fadeP)
-        fadeP.shader = fL; c.drawRect(0f, 0f, w * 0.16f, h, fadeP)
-        fadeP.shader = fR; c.drawRect(w * 0.84f, 0f, w, h, fadeP)
+        fadeP.shader = fBot
+        c.drawRect(0f, h * 0.80f - 1f, w, h, fadeP)
     }
 
     private fun blurred(src: Bitmap, f: Int): Bitmap {
@@ -314,7 +311,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
     }
 
     override fun onDraw(c: Canvas) {
-        if (away >= 0f) { drawAway(c); return }
+        if (away >= 0f) { drawAway(c); drawFade(c); return }
         if (layer == null || veil == null) return
         val now = SystemClock.uptimeMillis()
         val intro = min(1f, (now - introStart) / 1100f)
@@ -322,6 +319,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
         for (i in bursts.indices.reversed()) if (now - burstStart[i] > 1200) { bursts.removeAt(i); burstStart.removeAt(i) }
         compose(intro, now)
         drawScene(c)
+        drawFade(c)
         val busy = inside || presence > 0.002f || bursts.isNotEmpty() || now < trailUntil || intro < 1f
         if (busy && isShown) postInvalidateOnAnimation()
     }
