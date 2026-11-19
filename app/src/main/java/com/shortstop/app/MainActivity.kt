@@ -75,6 +75,8 @@ class MainActivity : Activity() {
     private var setupCard: View? = null
     private var healthCard: LinearLayout? = null
     private var schedIntro: View? = null
+    private var schedScroll: View? = null
+    private var schedEmptyHost: FrameLayout? = null
     private var schedPageTitle: View? = null
     private var schedHeadCard: View? = null
     private var runExtras: View? = null
@@ -1105,7 +1107,12 @@ class MainActivity : Activity() {
         statsWrap = wrap
         col.addView(wrap, lp(matchP, wrapC))
 
-        page.addView(scrollPage(col), lp(matchP, 0, 1f))
+        val sc = scrollPage(col)
+        schedScroll = sc
+        page.addView(sc, lp(matchP, 0, 1f))
+        val eh = FrameLayout(this).apply { visibility = View.GONE }
+        schedEmptyHost = eh
+        page.addView(eh, lp(matchP, 0, 1f))
 
         // Start bar
         val bar = LinearLayout(this).apply {
@@ -1690,7 +1697,9 @@ class MainActivity : Activity() {
         updateStatusBar()
         schedPageTitle?.visibility = vis
         schedHeadCard?.visibility = vis
-        if (items.isEmpty()) { fillScheduleEmpty(list); return }
+        schedScroll?.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+        schedEmptyHost?.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        if (items.isEmpty()) { schedEmptyHost?.let { fillScheduleEmpty(it) }; return }
 
         val activeId = Store.scheduleActive(this)?.id
         for (s in items) {
@@ -1731,14 +1740,15 @@ class MainActivity : Activity() {
     }
 
     /** Regain-style empty state: a title, a swipeable row of ready-made windows, dots. */
-    private fun fillScheduleEmpty(list: LinearLayout) {
+    private fun fillScheduleEmpty(host: FrameLayout) {
+        host.removeAllViews()
         val holder = FrameLayout(this)
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val blurView = UpwardBlurView(this).apply { visibility = View.GONE }
         val screenW = resources.displayMetrics.widthPixels
         // Dither Veil: burn through the 1-bit photo with a finger
         val veil = DitherVeil(this, pal.dark, pal.canvas)
-        content.addView(veil, lp(matchP, dp(330)).apply { topMargin = -dp(20); marginStart = -dp(20); marginEnd = -dp(20) })
+        content.addView(veil, lp(matchP, dp(330)))
         content.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(2), dp(8), dp(22))
@@ -1814,7 +1824,7 @@ class MainActivity : Activity() {
         content.addView(dots, lp(matchP, wrapC).apply { topMargin = dp(14) })
         holder.addView(content, FrameLayout.LayoutParams(matchP, wrapC))
         holder.addView(blurView, FrameLayout.LayoutParams(matchP, matchP))
-        list.addView(holder, lp(matchP, wrapC))
+        host.addView(holder, FrameLayout.LayoutParams(matchP, wrapC))
     }
 
     private fun showScheduleSheet(existing: Store.FocusSchedule?) {
