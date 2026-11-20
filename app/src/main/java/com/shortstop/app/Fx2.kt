@@ -83,8 +83,9 @@ class HoldPill(
         color = pal.ink; typeface = fonts.semi; textAlign = Paint.Align.CENTER
     }
     private val light = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = pal.canvas; typeface = fonts.semi; textAlign = Paint.Align.CENTER
+        color = Color.parseColor("#1A0F08"); typeface = fonts.semi; textAlign = Paint.Align.CENTER
     }
+    private var fillW = 0f
     private val rect = RectF()
     private val er = RectF()
     private val clip = Path()
@@ -138,7 +139,7 @@ class HoldPill(
             if (progress < 0.99f) {
                 if (glowShader == null) {
                     glowShader = LinearGradient(
-                        0f, 0f, context.dpf(36f), 0f, withAlpha(pal.ink, 0.28f), withAlpha(pal.ink, 0f),
+                        0f, 0f, context.dpf(36f), 0f, withAlpha(Color.parseColor("#FF6A2B"), 0.30f), withAlpha(Color.parseColor("#FF6A2B"), 0f),
                         Shader.TileMode.CLAMP
                     )
                 }
@@ -146,6 +147,10 @@ class HoldPill(
                 glowShader!!.setLocalMatrix(gm)
                 glow.shader = glowShader
                 c.drawRect(edgeX, 0f, edgeX + context.dpf(36f), h, glow)
+            }
+            if (fillW != w) {
+                fillW = w
+                fill.shader = LinearGradient(0f, 0f, w, 0f, Color.parseColor("#FFB27A"), Color.parseColor("#FF6A2B"), Shader.TileMode.CLAMP)
             }
             c.drawPath(wave, fill)
             c.save()

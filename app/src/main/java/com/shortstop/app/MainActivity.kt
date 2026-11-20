@@ -13,7 +13,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Shader
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -359,7 +361,10 @@ class MainActivity : Activity() {
         var on = false
             private set
         var listener: ((Boolean) -> Unit)? = null
+        var brand = false
         private var p = 0f
+        private var brandW = 0f
+        private val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private var anim: ValueAnimator? = null
         private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val knobPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -402,11 +407,23 @@ class MainActivity : Activity() {
         override fun onDraw(c: Canvas) {
             val w = width.toFloat()
             val h = height.toFloat()
-            trackPaint.color = eval.evaluate(p, pal.track, pal.ink) as Int
             val offKnob = if (pal.dark) Color.parseColor("#BBBBBB") else Color.WHITE
-            knobPaint.color = eval.evaluate(p, offKnob, pal.canvas) as Int
             rect.set(0f, 0f, w, h)
-            c.drawRoundRect(rect, h / 2f, h / 2f, trackPaint)
+            if (brand) {
+                trackPaint.color = pal.track
+                knobPaint.color = eval.evaluate(p, offKnob, Color.WHITE) as Int
+                c.drawRoundRect(rect, h / 2f, h / 2f, trackPaint)
+                if (brandW != w) {
+                    brandW = w
+                    brandPaint.shader = LinearGradient(0f, 0f, w, 0f, Color.parseColor("#FFB27A"), Color.parseColor("#FF6A2B"), Shader.TileMode.CLAMP)
+                }
+                brandPaint.alpha = (255 * p).toInt()
+                c.drawRoundRect(rect, h / 2f, h / 2f, brandPaint)
+            } else {
+                trackPaint.color = eval.evaluate(p, pal.track, pal.ink) as Int
+                knobPaint.color = eval.evaluate(p, offKnob, pal.canvas) as Int
+                c.drawRoundRect(rect, h / 2f, h / 2f, trackPaint)
+            }
             val pad = dp(3).toFloat()
             val r = h / 2f - pad
             val left = pad + r
@@ -1107,12 +1124,7 @@ class MainActivity : Activity() {
         statsWrap = wrap
         col.addView(wrap, lp(matchP, wrapC))
 
-        val sc = scrollPage(col)
-        schedScroll = sc
-        page.addView(sc, lp(matchP, 0, 1f))
-        val eh = FrameLayout(this).apply { visibility = View.GONE }
-        schedEmptyHost = eh
-        page.addView(eh, lp(matchP, 0, 1f))
+        page.addView(scrollPage(col), lp(matchP, 0, 1f))
 
         // Start bar
         val bar = LinearLayout(this).apply {
@@ -1622,7 +1634,12 @@ class MainActivity : Activity() {
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         schedCol = list
         col.addView(list, lp(matchP, wrapC).apply { topMargin = dp(14) })
-        page.addView(scrollPage(col), lp(matchP, 0, 1f))
+        val sc = scrollPage(col)
+        schedScroll = sc
+        page.addView(sc, lp(matchP, 0, 1f))
+        val eh = FrameLayout(this).apply { visibility = View.GONE }
+        schedEmptyHost = eh
+        page.addView(eh, lp(matchP, 0, 1f))
         val barWrap = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(dp(20), dp(10), dp(20), dp(14)) }
         barWrap.addView(pill("Create schedule", true) { showScheduleSheet(null) }.apply {
             textSize = 15f
@@ -2806,8 +2823,12 @@ class MainActivity : Activity() {
         v.animate().alpha(1f).setDuration(220).setInterpolator(DecelerateInterpolator(1.4f)).start()
     }
 
-    private fun sCard(): LinearLayout = LinearLayout(this).apply {
+    private fun sCard(): LinearLayout = GlowCard(
+        this, Color.argb(if (pal.dark) 26 else 20, Color.red(pal.ink), Color.green(pal.ink), Color.blue(pal.ink)),
+        dp(16).toFloat(), dp(170).toFloat()
+    ).apply {
         orientation = LinearLayout.VERTICAL
+        ambient = pal.dark
         background = round(pal.surface, 16, pal.border, dp(1))
         clipToOutline = true
         outlineProvider = object : ViewOutlineProvider() {
@@ -2877,6 +2898,7 @@ class MainActivity : Activity() {
 
     private fun sToggle(title: String, sub: String, checked: Boolean, onChange: (Boolean) -> Unit): View {
         val t = ToggleView(this)
+        t.brand = true
         t.setOn(checked, false)
         t.listener = onChange
         return sRow(title, sub, t) { t.performClick() }
@@ -2888,32 +2910,59 @@ class MainActivity : Activity() {
         background = round(Color.TRANSPARENT, 20, if (ok) pal.border else Color.argb(120, 255, 90, 31), dp(1))
     }
 
-    /** Segmented control in one track; returns the view and a setter that restyles it. */
+    /** Segmented control: the filled pill glides to the chosen cell. Returns the view and a setter. */
     private fun sSeg(options: List<Pair<Int, String>>, selected: Int, onPick: (Int) -> Boolean): Pair<View, (Int) -> Unit> {
-        val track = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        val track = FrameLayout(this).apply {
             background = round(pal.canvas, 12, pal.border, dp(1))
             setPadding(dp(3), dp(3), dp(3), dp(3))
         }
+        val ind = View(this).apply { background = round(pal.ink, 9) }
+        track.addView(ind, FrameLayout.LayoutParams(0, wrapC))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        track.addView(row, FrameLayout.LayoutParams(matchP, wrapC))
         val cells = ArrayList<TextView>()
-        fun style(sel: Int) = cells.forEachIndexed { i, c ->
-            val on = options[i].first == sel
-            c.setTextColor(if (on) pal.canvas else pal.muted)
-            c.background = if (on) round(pal.ink, 9) else null
+        var cur = options.indexOfFirst { it.first == selected }
+        var glide: ValueAnimator? = null
+        fun place(animate: Boolean) {
+            val cw = row.width / options.size
+            if (cw <= 0) return
+            ind.layoutParams = (ind.layoutParams as FrameLayout.LayoutParams).apply { width = cw; height = row.height }
+            val to = if (cur < 0) 0f else (cur * cw).toFloat()
+            val from = ind.translationX
+            glide?.cancel()
+            ind.visibility = if (cur < 0) View.INVISIBLE else View.VISIBLE
+            val fromC = cells.map { it.currentTextColor }
+            val toC = cells.indices.map { if (it == cur) pal.canvas else pal.muted }
+            if (!animate || reducedMotion()) {
+                ind.translationX = to
+                cells.forEachIndexed { i, c -> c.setTextColor(toC[i]) }
+                return
+            }
+            glide = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 380
+                interpolator = SpringInterpolator(16f, 0.8f, 0.38f)
+                addUpdateListener {
+                    val f = it.animatedValue as Float
+                    ind.translationX = from + (to - from) * f
+                    val g = f.coerceIn(0f, 1f)
+                    cells.forEachIndexed { i, c -> c.setTextColor(android.animation.ArgbEvaluator().evaluate(g, fromC[i], toC[i]) as Int) }
+                }
+                start()
+            }
         }
         options.forEachIndexed { i, (value, name) ->
-            val c = tv(name, 13f, fonts.semi, pal.muted, Gravity.CENTER).apply {
+            val c = tv(name, 13f, fonts.semi, if (i == cur) pal.canvas else pal.muted, Gravity.CENTER).apply {
                 setPadding(dp(4), dp(10), dp(4), dp(10))
                 isClickable = true
                 isFocusable = true
-                setOnClickListener { if (onPick(value)) style(value) }
+                setOnClickListener { if (onPick(value)) { cur = i; place(true) } }
             }
             cells.add(c)
-            track.addView(c, lp(0, wrapC, 1f).apply { if (i < options.size - 1) marginEnd = dp(2) })
+            row.addView(c, lp(0, wrapC, 1f))
         }
-        style(selected)
+        row.addOnLayoutChangeListener { _, l, _, r, _, _, _, _, _ -> if (r - l > 0) place(false) }
         val wrap = LinearLayout(this).apply { setPadding(dp(16), dp(10), dp(16), dp(10)); addView(track, lp(matchP, wrapC)) }
-        return wrap to { v: Int -> style(v) }
+        return wrap to { v: Int -> cur = options.indexOfFirst { it.first == v }; place(true) }
     }
 
     private fun sStepper(caption: (Int) -> String, start: Int, min: Int, max: Int, onSet: (Int) -> Unit): Pair<View, (Int) -> Unit> {
