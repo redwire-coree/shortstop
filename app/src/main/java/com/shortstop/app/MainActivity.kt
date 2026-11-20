@@ -2718,6 +2718,9 @@ class MainActivity : Activity() {
         settingsCol = col
         val sv = scrollPage(col)
         settingsScroll = sv
+        if (resources.displayMetrics.widthPixels > dp(640)) {
+            col.layoutParams = FrameLayout.LayoutParams(dp(600), wrapC, Gravity.CENTER_HORIZONTAL)
+        }
         fillSettings()
         return sv
     }
@@ -2787,6 +2790,147 @@ class MainActivity : Activity() {
 
     private fun statusText(ok: Boolean) = if (ok) "On" else "Off"
 
+    // ---------- Settings-only building blocks (flat grouped rows) ----------
+    private val EMBER = Color.parseColor("#FF5A1F")
+
+    private fun reducedMotion(): Boolean =
+        try { Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f } catch (e: Exception) { false }
+
+    /** Subtle fade reveal (react-bits FadeContent): opacity only, skipped when animations are off. */
+    private fun fadeReveal(v: View, show: Boolean) {
+        v.animate().cancel()
+        if (!show) { v.visibility = View.GONE; v.alpha = 1f; return }
+        v.visibility = View.VISIBLE
+        if (reducedMotion()) { v.alpha = 1f; return }
+        v.alpha = 0f
+        v.animate().alpha(1f).setDuration(220).setInterpolator(DecelerateInterpolator(1.4f)).start()
+    }
+
+    private fun sCard(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = round(pal.surface, 16, pal.border, dp(1))
+        clipToOutline = true
+        outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, dp(16).toFloat())
+            }
+        }
+    }
+
+    private fun sDiv() = View(this).apply { setBackgroundColor(pal.border) }
+
+    private fun LinearLayout.sAdd(v: View) {
+        if (childCount > 0) addView(sDiv(), lp(matchP, dp(1)).apply { marginStart = dp(16) })
+        addView(v, lp(matchP, wrapC))
+    }
+
+    /** Section header: small ember tick, uppercase label. */
+    private fun sSection(label: String): LinearLayout {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(26), 0, dp(10))
+        }
+        val tick = View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.parseColor("#FFB27A"), Color.parseColor("#FF6A2B"))).apply { cornerRadius = dp(2).toFloat() }
+        }
+        head.addView(tick, lp(dp(10), dp(3)).apply { marginEnd = dp(8) })
+        head.addView(tv(label.uppercase(), 11.5f, fonts.semi, pal.muted).apply { letterSpacing = 0.12f })
+        box.addView(head)
+        return box
+    }
+
+    private fun sRow(title: String, sub: String, trailing: View?, onClick: (() -> Unit)? = null): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(56)
+            setPadding(dp(16), dp(11), dp(16), dp(11))
+        }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(tv(title, 15f, fonts.semi, pal.ink))
+        if (sub.isNotEmpty()) col.addView(tv(sub, 12.5f, fonts.regular, pal.muted).apply { setPadding(0, dp(2), 0, 0) })
+        row.addView(col, lp(0, wrapC, 1f).apply { marginEnd = dp(12) })
+        if (trailing != null) row.addView(trailing)
+        if (onClick != null) {
+            row.isClickable = true
+            row.isFocusable = true
+            row.foreground = android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(Color.argb(if (pal.dark) 34 else 22, Color.red(pal.ink), Color.green(pal.ink), Color.blue(pal.ink))),
+                null, android.graphics.drawable.ColorDrawable(Color.WHITE))
+            row.setOnClickListener { onClick() }
+        }
+        return row
+    }
+
+    private fun sTrail(first: View?): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        if (first != null) addView(first)
+        addView(tv("›", 20f, fonts.regular, pal.muted).apply { setPadding(dp(8), 0, 0, 0) })
+    }
+
+    private fun sLink(title: String, sub: String, value: String? = null, onClick: () -> Unit): View =
+        sRow(title, sub, sTrail(value?.let { tv(it, 14f, fonts.medium, pal.muted) }), onClick)
+
+    private fun sToggle(title: String, sub: String, checked: Boolean, onChange: (Boolean) -> Unit): View {
+        val t = ToggleView(this)
+        t.setOn(checked, false)
+        t.listener = onChange
+        return sRow(title, sub, t) { t.performClick() }
+    }
+
+    /** Granted shows a quiet outline, missing shows ember so it draws the eye. */
+    private fun sStatus(ok: Boolean): TextView = tv(if (ok) "On" else "Off", 12f, fonts.semi, if (ok) pal.ink else EMBER).apply {
+        setPadding(dp(10), dp(4), dp(10), dp(4))
+        background = round(Color.TRANSPARENT, 20, if (ok) pal.border else Color.argb(120, 255, 90, 31), dp(1))
+    }
+
+    /** Segmented control in one track; returns the view and a setter that restyles it. */
+    private fun sSeg(options: List<Pair<Int, String>>, selected: Int, onPick: (Int) -> Boolean): Pair<View, (Int) -> Unit> {
+        val track = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = round(pal.canvas, 12, pal.border, dp(1))
+            setPadding(dp(3), dp(3), dp(3), dp(3))
+        }
+        val cells = ArrayList<TextView>()
+        fun style(sel: Int) = cells.forEachIndexed { i, c ->
+            val on = options[i].first == sel
+            c.setTextColor(if (on) pal.canvas else pal.muted)
+            c.background = if (on) round(pal.ink, 9) else null
+        }
+        options.forEachIndexed { i, (value, name) ->
+            val c = tv(name, 13f, fonts.semi, pal.muted, Gravity.CENTER).apply {
+                setPadding(dp(4), dp(10), dp(4), dp(10))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { if (onPick(value)) style(value) }
+            }
+            cells.add(c)
+            track.addView(c, lp(0, wrapC, 1f).apply { if (i < options.size - 1) marginEnd = dp(2) })
+        }
+        style(selected)
+        val wrap = LinearLayout(this).apply { setPadding(dp(16), dp(10), dp(16), dp(10)); addView(track, lp(matchP, wrapC)) }
+        return wrap to { v: Int -> style(v) }
+    }
+
+    private fun sStepper(caption: (Int) -> String, start: Int, min: Int, max: Int, onSet: (Int) -> Unit): Pair<View, (Int) -> Unit> {
+        var v = start
+        val cap = tv(caption(v), 14.5f, fonts.medium, pal.ink)
+        fun setV(n: Int) { v = n.coerceIn(min, max); cap.text = caption(v) }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(9), dp(16), dp(9))
+        }
+        row.addView(cap, lp(0, wrapC, 1f))
+        row.addView(stepBtn(false) { if (free()) { setV(v - 1); onSet(v) } })
+        row.addView(stepBtn(true) { if (free()) { setV(v + 1); onSet(v) } }, lp(dp(46), dp(38)).apply { marginStart = dp(8) })
+        return row to { n: Int -> setV(n) }
+    }
+
     private fun fillSettings() {
         val col = settingsCol ?: return
         val keepY = settingsScroll?.scrollY ?: 0
@@ -2794,103 +2938,129 @@ class MainActivity : Activity() {
 
         col.addView(display("Settings", 30f))
 
-        // Ultra Focus
-        col.addView(sectionTitle("Focus"))
-        val focus = card()
-        focus.addRow(linkRow("Ultra Focus", "Lock, study mode, guards, notifications") { showUltraSheet() })
-        focus.addRow(linkRow("Daily focus goal", fmtMin(Store.goalMin(this))) { showGoalSheet() })
-        col.addView(focus, lp(matchP, wrapC))
+        // Focus
+        val sFocus = sSection("Focus")
+        val focus = sCard()
+        focus.sAdd(sLink("Ultra Focus", "Lock, study mode, guards") { showUltraSheet() })
+        focus.sAdd(sLink("Daily focus goal", "Your target each day", fmtMin(Store.goalMin(this))) { showGoalSheet() })
+        sFocus.addView(focus, lp(matchP, wrapC))
+        col.addView(sFocus)
 
         // Hold to open
-        col.addView(sectionTitle("Hold to open"))
-        val hold = card()
+        val sHold = sSection("Hold to open")
+        val hold = sCard()
         val holdHolder = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         holdHolder.visibility = if (Store.holdOn(this)) View.VISIBLE else View.GONE
-        hold.addRow(toggleRow("Hold to open", "Blocked screens ask you to hold a button first", Store.holdOn(this)) {
+        hold.sAdd(sToggle("Hold to open", "Blocked screens ask you to hold first", Store.holdOn(this)) {
             Store.setHoldOn(this, it)
-            holdHolder.visibility = if (it) View.VISIBLE else View.GONE
+            fadeReveal(holdHolder, it)
         })
-        holdHolder.addView(divider(), lp(matchP, dp(1)))
-        holdHolder.addView(chipRow(listOf(10 to "10s", 30 to "30s", 60 to "60s", 180 to "180s"),
-            Store.holdSeconds(this)) { if (free()) Store.setHoldSeconds(this, it) })
-        holdHolder.addView(divider(), lp(matchP, dp(1)))
-        holdHolder.addView(stepperRow({ "Hold for $it seconds" }, Store.holdSeconds(this), 2, 180, 1) { Store.setHoldSeconds(this, it) })
-        holdHolder.addView(divider(), lp(matchP, dp(1)))
-        holdHolder.addView(stepperRow({ "Then open for $it min" }, Store.passMinutes(this), 1, 180, 1) { Store.setPassMinutes(this, it) })
-        holdHolder.addView(divider(), lp(matchP, dp(1)))
-        holdHolder.addView(toggleRow("Longer each time", "+2 seconds for every pass taken today", Store.progressive(this)) {
+        var stepSet: (Int) -> Unit = {}
+        val (seg, segSet) = sSeg(listOf(10 to "10s", 30 to "30s", 60 to "60s", 180 to "180s"), Store.holdSeconds(this)) {
+            if (free()) { Store.setHoldSeconds(this, it); stepSet(it); true } else false
+        }
+        val (holdStep, hs) = sStepper({ "Hold for $it seconds" }, Store.holdSeconds(this), 2, 180) {
+            Store.setHoldSeconds(this, it); segSet(it)
+        }
+        stepSet = hs
+        holdHolder.addView(sDiv(), lp(matchP, dp(1)).apply { marginStart = dp(16) })
+        holdHolder.addView(seg, lp(matchP, wrapC))
+        holdHolder.addView(sDiv(), lp(matchP, dp(1)).apply { marginStart = dp(16) })
+        holdHolder.addView(holdStep, lp(matchP, wrapC))
+        holdHolder.addView(sDiv(), lp(matchP, dp(1)).apply { marginStart = dp(16) })
+        holdHolder.addView(sStepper({ "Then open for $it min" }, Store.passMinutes(this), 1, 180) { Store.setPassMinutes(this, it) }.first, lp(matchP, wrapC))
+        holdHolder.addView(sDiv(), lp(matchP, dp(1)).apply { marginStart = dp(16) })
+        holdHolder.addView(sToggle("Longer each time", "+2 seconds for every pass today", Store.progressive(this)) {
             Store.setProgressive(this, it)
-        })
-        holdHolder.addView(divider(), lp(matchP, dp(1)))
+        }, lp(matchP, wrapC))
+        holdHolder.addView(sDiv(), lp(matchP, dp(1)).apply { marginStart = dp(16) })
         holdHolder.addView(HoldPill(this, pal, fonts, { Store.holdSeconds(this) }) {
             toast("That is the hold", "This is what the wall asks for.")
         }, lp(matchP, wrapC).apply { setMargins(dp(16), dp(14), dp(16), dp(14)) })
         hold.addView(holdHolder, lp(matchP, wrapC))
-        col.addView(hold, lp(matchP, wrapC))
+        sHold.addView(hold, lp(matchP, wrapC))
 
-        col.addView(groupLabel("Message on the wall"))
+        sHold.addView(tv("Message on the wall", 13f, fonts.semi, pal.muted).apply { setPadding(dp(4), dp(18), 0, dp(8)) })
         val msg = input("Why are you here?")
+        msg.background = round(pal.surface, 14, pal.border, dp(1))
         msg.setText(Store.message(this))
         watch(msg) { Store.setMessage(this, it) }
-        col.addView(msg, lp(matchP, wrapC))
+        sHold.addView(msg, lp(matchP, wrapC))
+        col.addView(sHold)
 
         // Routine
-        col.addView(sectionTitle("Routine"))
-        val routine = card()
-        val schedHolder = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val sRoutine = sSection("Routine")
+        val routine = sCard()
+        val schedHolder = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, dp(16), 0) }
         fun refill() {
             schedHolder.removeAllViews()
             schedHolder.addView(scheduleEditor { refill() })
         }
         refill()
         schedHolder.visibility = if (Store.scheduleOn(this)) View.VISIBLE else View.GONE
-        routine.addRow(toggleRow("Only run always-on blocking on a schedule", "Off: blocking runs all day", Store.scheduleOn(this)) {
+        routine.sAdd(sToggle("Run on a schedule", "Off means always-on blocking runs all day", Store.scheduleOn(this)) {
             Store.setScheduleOn(this, it)
-            schedHolder.visibility = if (it) View.VISIBLE else View.GONE
+            fadeReveal(schedHolder, it)
         })
         routine.addView(schedHolder, lp(matchP, wrapC))
-        col.addView(routine, lp(matchP, wrapC))
+        sRoutine.addView(routine, lp(matchP, wrapC))
+        col.addView(sRoutine)
 
-        // Snooze
-        col.addView(sectionTitle("Need a break?"))
+        // Pause (weakens protection, so it is set apart in ember)
+        val sPause = sSection("Pause blocking")
         val snooze = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         listOf(5 to "5 min", 15 to "15 min", 60 to "1 hour").forEachIndexed { i, (mins, name) ->
-            snooze.addView(pill(name, false) {
-                if (free()) {
-                    Store.setSnooze(this, System.currentTimeMillis() + mins * 60_000L)
-                    toast("Always-on blocking paused for $name")
+            val b = tv(name, 14f, fonts.semi, EMBER, Gravity.CENTER).apply {
+                setPadding(dp(8), dp(13), dp(8), dp(13))
+                background = round(Color.TRANSPARENT, 14, Color.argb(130, 255, 90, 31), dp(1))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    if (free()) {
+                        Store.setSnooze(this@MainActivity, System.currentTimeMillis() + mins * 60_000L)
+                        toast("Always-on blocking paused for $name")
+                    }
                 }
-            }, lp(0, wrapC, 1f).apply { if (i < 2) marginEnd = dp(8) })
+            }
+            press(b)
+            snooze.addView(b, lp(0, wrapC, 1f).apply { if (i < 2) marginEnd = dp(8) })
         }
-        col.addView(snooze)
+        sPause.addView(snooze, lp(matchP, wrapC))
+        sPause.addView(note("Always-on blocking switches itself back on afterwards."))
+        col.addView(sPause)
 
         // Extras
-        col.addView(sectionTitle("Extras"))
-        val extras = card()
-        extras.addRow(toggleRow("Skip YouTube ads", "Taps the Skip button for you", Store.autoSkip(this)) { Store.setAutoSkip(this, it) })
-        extras.addRow(toggleRow("Guard Shortstop itself", "Hold to open before settings can be changed", Store.selfLock(this)) { Store.setSelfLock(this, it) })
-        col.addView(extras, lp(matchP, wrapC))
+        val sExtras = sSection("Extras")
+        val extras = sCard()
+        extras.sAdd(sToggle("Skip YouTube ads", "Taps the Skip button for you", Store.autoSkip(this)) { Store.setAutoSkip(this, it) })
+        extras.sAdd(sToggle("Guard Shortstop itself", "Hold to open before settings change", Store.selfLock(this)) { Store.setSelfLock(this, it) })
+        sExtras.addView(extras, lp(matchP, wrapC))
+        col.addView(sExtras)
 
         // Appearance
-        col.addView(sectionTitle("Appearance"))
-        col.addView(chipRow(listOf(0 to "System", 1 to "Light", 2 to "Dark"), Store.theme(this)) {
+        val sLook = sSection("Appearance")
+        val look = sCard()
+        look.addView(sSeg(listOf(0 to "System", 1 to "Light", 2 to "Dark"), Store.theme(this)) {
             Store.setTheme(this, it)
             ui.post { buildAll() }
-        })
+            true
+        }.first, lp(matchP, wrapC))
+        sLook.addView(look, lp(matchP, wrapC))
+        col.addView(sLook)
 
         // Permissions and help
-        col.addView(sectionTitle("Permissions and help"))
-        val fix = card()
-        fix.addRow(linkRow("Accessibility service", statusText(serviceOn())) { open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) })
-        fix.addRow(linkRow("Notification access", statusText(notifAccess())) { open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
-        fix.addRow(linkRow("Usage access", statusText(usageGranted())) { open(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
-        fix.addRow(linkRow("App info and restricted settings", "Allow restricted settings from the ⋮ menu") {
+        val sPerm = sSection("Permissions and help")
+        val fix = sCard()
+        fix.sAdd(sRow("Accessibility service", "Needed to block Shorts and apps", sTrail(sStatus(serviceOn()))) { open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) })
+        fix.sAdd(sRow("Notification access", "Lets Shortstop see notifications", sTrail(sStatus(notifAccess()))) { open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
+        fix.sAdd(sRow("Usage access", "For screen time and stats", sTrail(sStatus(usageGranted()))) { open(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
+        fix.sAdd(sLink("App info", "Allow restricted settings from the ⋮ menu") {
             open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         })
-        fix.addRow(linkRow("Battery optimisation", "Stop the phone from closing Shortstop") {
+        fix.sAdd(sLink("Battery optimisation", "Stop the phone from closing Shortstop") {
             open(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         })
-        fix.addRow(linkRow("Xiaomi / Redmi autostart", "Let Shortstop start itself and run in the background") {
+        fix.sAdd(sLink("Xiaomi / Redmi autostart", "Let Shortstop run in the background") {
             try {
                 startActivity(Intent().setComponent(ComponentName(
                     "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")))
@@ -2898,8 +3068,9 @@ class MainActivity : Activity() {
                 toast("Open Security > Permissions > Autostart and switch Shortstop on.")
             }
         })
-        col.addView(fix, lp(matchP, wrapC))
-        col.addView(note("Shortstop runs fully offline. Nothing leaves your phone."))
+        sPerm.addView(fix, lp(matchP, wrapC))
+        sPerm.addView(note("Shortstop runs fully offline. Nothing leaves your phone."))
+        col.addView(sPerm)
 
         settingsScroll?.post { settingsScroll?.scrollTo(0, keepY) }
     }
