@@ -1385,6 +1385,87 @@ class MainActivity : Activity() {
         return c
     }
 
+    private var focusOpen: View? = null
+    private val focusClosers = HashMap<View, () -> Unit>()
+
+    /** Compact card that swaps a preview for the full detail in place, with a soft spring on its height. */
+    private fun expCard(title: String, preview: View, detail: View, expandable: Boolean): LinearLayout {
+        val c = card()
+        c.background = round(FocusTheme.cardFill(pal.dark), 24, FocusTheme.cardEdge(pal.dark), dp(1))
+        val chev = Chevron(this, pal.muted)
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(16), 0, dp(10)) }
+        head.addView(tv(title, 15f, fonts.semi, pal.ink), lp(0, wrapC, 1f))
+        if (expandable) head.addView(chev, lp(dp(18), dp(18)))
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(preview, lp(matchP, wrapC))
+        body.addView(detail, lp(matchP, wrapC))
+        detail.visibility = View.GONE
+        c.addView(head, lp(matchP, wrapC))
+        c.addView(body, lp(matchP, wrapC))
+        if (!expandable) return c
+        var open = false
+        var anim: ValueAnimator? = null
+        fun set(on: Boolean, animate: Boolean) {
+            if (on == open) return
+            open = on
+            val w = body.width
+            val h0 = body.height
+            anim?.cancel()
+            val incoming = if (on) detail else preview
+            val outgoing = if (on) preview else detail
+            outgoing.visibility = View.GONE
+            incoming.visibility = View.VISIBLE
+            val lpB = body.layoutParams
+            lpB.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            val calm = reducedMotion() || !animate || w == 0
+            chev.animate().cancel()
+            if (calm) {
+                chev.rotation = if (on) 180f else 0f
+                incoming.alpha = 1f
+                body.requestLayout()
+                return
+            }
+            chev.animate().rotation(if (on) 180f else 0f).setDuration(320)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
+            body.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            val h1 = body.measuredHeight
+            incoming.alpha = 0f
+            lpB.height = h0
+            body.layoutParams = lpB
+            anim = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 520
+                interpolator = SpringInterpolator(16f, 0.78f, 0.5f)
+                addUpdateListener {
+                    val f = it.animatedValue as Float
+                    lpB.height = (h0 + (h1 - h0) * f).toInt().coerceAtLeast(0)
+                    body.layoutParams = lpB
+                    incoming.alpha = (f * 1.4f).coerceIn(0f, 1f)
+                }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(a: android.animation.Animator) {
+                        lpB.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                        body.layoutParams = lpB
+                        incoming.alpha = 1f
+                    }
+                    override fun onAnimationCancel(a: android.animation.Animator) { incoming.alpha = 1f }
+                })
+                start()
+            }
+        }
+        focusClosers[c] = { set(false, true) }
+        c.isClickable = true
+        c.setOnClickListener {
+            if (open) { set(false, true); if (focusOpen === c) focusOpen = null }
+            else {
+                val prev = focusOpen
+                if (prev != null && prev !== c) focusClosers[prev]?.invoke()
+                focusOpen = c
+                set(true, true)
+            }
+        }
+        return c
+    }
+
     private fun fillFocusStats() {
         val col = focusStatsCol ?: return
         col.removeAllViews()
@@ -1403,51 +1484,86 @@ class MainActivity : Activity() {
                     lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(14) })
 
                 val sessions = Store.sessionsOn(this, today)
-                val segs = sessions.map { s ->
-                    val c = Calendar.getInstance().apply { timeInMillis = s.start }
-                    val a = (c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)) / 1440f
-                    a to (a + s.minutes / 1440f)
-                }
-                val sum = sectionCard("Today's summary")
-                sum.addView(TimelineView(this, pal, fonts, segs), lp(matchP, wrapC).apply { bottomMargin = dp(10) })
-                col.addView(sum, lp(matchP, wrapC).apply { topMargin = dp(18) })
-
-                val tags = sectionCard("Tags")
-                if (sessions.isEmpty()) tags.addView(tv("No sessions yet", 13f, fonts.regular, pal.muted).apply { setPadding(0, 0, 0, dp(16)) })
-                sessions.groupBy { it.tag.ifEmpty { "No tag" } }.forEach { (t, l) ->
-                    val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, dp(12)) }
-                    r.addView(tv(t, 15f, fonts.medium, pal.ink), lp(0, wrapC, 1f))
-                    r.addView(tv(fmtMin(l.sumOf { it.minutes }), 15f, fonts.semi, pal.ink))
-                    tags.addView(r)
-                }
-                col.addView(tags, lp(matchP, wrapC).apply { topMargin = dp(12) })
-
-                val sess = sectionCard("Sessions")
-                if (sessions.isEmpty()) sess.addView(tv("No sessions yet", 13f, fonts.regular, pal.muted).apply { setPadding(0, 0, 0, dp(16)) })
+                focusClosers.clear(); focusOpen = null
                 val tf = SimpleDateFormat(if (DateFormat.is24HourFormat(this)) "HH:mm" else "h:mm a", Locale.getDefault())
-                sessions.forEachIndexed { idx, s ->
+
+                // Today's summary
+                val sumPrev = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(6)) }
+                sumPrev.addView(FocusTimeline(this, pal, fonts, sessions, false), lp(matchP, wrapC))
+                val sumDet = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(14)) }
+                sumDet.addView(FocusTimeline(this, pal, fonts, sessions, true), lp(matchP, wrapC))
+                sumDet.addView(tv("${sessions.size} session${if (sessions.size == 1) "" else "s"} · ${fmtMin(sessions.sumOf { it.minutes })} focused",
+                    13f, fonts.medium, pal.ink).apply { setPadding(0, dp(6), 0, dp(6)) })
+                sessions.forEach { s ->
+                    sumDet.addView(tv(tf.format(java.util.Date(s.start)) + " – " + tf.format(java.util.Date(s.start + s.minutes * 60000L)) +
+                        "  ·  " + s.tag.ifEmpty { "Focus" }, 12f, fonts.regular, pal.muted).apply { setPadding(0, dp(3), 0, dp(3)) })
+                }
+                col.addView(expCard("Today's summary", sumPrev, sumDet, sessions.isNotEmpty()), lp(matchP, wrapC).apply { topMargin = dp(18) })
+
+                // Tags
+                val tagList = sessions.groupBy { it.tag.ifEmpty { "No tag" } }
+                    .map { (t, l) -> t to l.sumOf { it.minutes } }.sortedByDescending { it.second }
+                val tagTotal = tagList.sumOf { it.second }.coerceAtLeast(1)
+                fun tagRow(t: String, m: Int, bar: Boolean): LinearLayout {
+                    val r = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(if (bar) 12 else 10)) }
+                    val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                    top.addView(TagIcon(this, t, pal.dark), lp(dp(30), dp(30)).apply { marginEnd = dp(12) })
+                    top.addView(tv(t, 15f, fonts.medium, pal.ink), lp(0, wrapC, 1f))
+                    top.addView(tv(fmtMin(m), 15f, fonts.semi, pal.ink))
+                    r.addView(top)
+                    if (bar) r.addView(PeachBar(this, pal.dark, m.toFloat() / tagTotal), lp(matchP, dp(4)).apply { topMargin = dp(8); marginStart = dp(42) })
+                    return r
+                }
+                val tagPrev = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(6)) }
+                val tagDet = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(6)) }
+                if (tagList.isEmpty()) {
+                    val e = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(14)) }
+                    e.addView(TagIcon(this, "", pal.dark), lp(dp(36), dp(36)).apply { marginEnd = dp(12) })
+                    val et = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                    et.addView(tv("No tags yet", 15f, fonts.medium, pal.ink))
+                    et.addView(tv("Tag a focus session and it shows up here.", 12f, fonts.regular, pal.muted))
+                    e.addView(et, lp(0, wrapC, 1f))
+                    tagPrev.addView(e)
+                } else {
+                    tagList.take(2).forEach { (t, m) -> tagPrev.addView(tagRow(t, m, false)) }
+                    if (tagList.size > 2) tagPrev.addView(tv("+${tagList.size - 2} more", 12f, fonts.medium, pal.muted).apply { setPadding(0, 0, 0, dp(8)) })
+                    tagList.forEach { (t, m) -> tagDet.addView(tagRow(t, m, true)) }
+                }
+                col.addView(expCard("Tags", tagPrev, tagDet, tagList.size > 2 || tagList.isNotEmpty()), lp(matchP, wrapC).apply { topMargin = dp(12) })
+
+                // Sessions
+                fun sessRow(s: Store.Session): LinearLayout {
                     val r = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(12))
                     }
-                    val mark = StatusMark(this, pal, 24f)
-                    mark.setStatus(if (s.done) StatusMark.DONE else StatusMark.CANCELLED, true, idx * 70L)
                     r.isClickable = true
                     r.setOnClickListener { showSessionSheet(s) }
                     press(r)
-                    r.addView(mark, lp(wrapC, wrapC).apply { marginEnd = dp(12) })
                     val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                    left.addView(tv(s.tag.ifEmpty { "Focus" }, 15f, fonts.medium, pal.ink).apply {
-                        if (!s.done) paintFlags = paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
-                    })
-                    left.addView(tv(tf.format(java.util.Date(s.start)) + if (s.done) "" else " · ended early", 12f, fonts.regular, pal.muted))
+                    left.addView(tv(s.tag.ifEmpty { "Focus" }, 15f, fonts.medium, pal.ink))
+                    val st = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                    st.addView(View(this).apply {
+                        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (s.done) FocusCardColors.GREEN else FocusCardColors.EARLY) }
+                    }, lp(dp(6), dp(6)).apply { marginEnd = dp(6) })
+                    st.addView(tv(tf.format(java.util.Date(s.start)) + " · " + if (s.done) "Completed" else "Ended early", 12f, fonts.regular, pal.muted))
+                    left.addView(st, lp(wrapC, wrapC).apply { topMargin = dp(2) })
                     r.addView(left, lp(0, wrapC, 1f))
                     r.addView(tv(fmtMin(s.minutes), 15f, fonts.semi, pal.ink).apply { setPadding(0, 0, dp(12), 0) })
                     r.addView(PulseHeart(this, pal, fonts, 0, Store.isLoved(this, s.start), false) { on, _ ->
                         Store.setLoved(this, s.start, on)
                     }, lp(dp(40), dp(40)))
-                    sess.addView(r)
+                    return r
                 }
-                col.addView(sess, lp(matchP, wrapC).apply { topMargin = dp(12) })
+                val sessPrev = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(6)) }
+                val sessDet = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(6)) }
+                if (sessions.isEmpty()) {
+                    sessPrev.addView(tv("No sessions yet", 13f, fonts.regular, pal.muted).apply { setPadding(0, 0, 0, dp(10)) })
+                } else {
+                    sessions.takeLast(2).forEach { sessPrev.addView(sessRow(it)) }
+                    if (sessions.size > 2) sessPrev.addView(tv("+${sessions.size - 2} earlier", 12f, fonts.medium, pal.muted).apply { setPadding(0, 0, 0, dp(8)) })
+                    sessions.forEach { sessDet.addView(sessRow(it)) }
+                }
+                col.addView(expCard("Sessions", sessPrev, sessDet, sessions.size > 2), lp(matchP, wrapC).apply { topMargin = dp(12) })
             }
             1 -> {
                 val start = weekStart(weekOffset)
