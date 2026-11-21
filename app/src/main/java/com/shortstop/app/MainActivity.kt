@@ -54,7 +54,7 @@ import java.util.Calendar
 import java.util.Locale
 
 /**
- * Shortstop. Black and white (Easlo design), Inter type, five tabs:
+ * Shortstop. Warm paper-and-citrus visual system, Inter type, five tabs:
  * Focus (timer, goal, sessions), Schedule, Blocks, Stats, Settings.
  * Controls update their own views in place: nothing is rebuilt when you tap.
  */
@@ -346,8 +346,10 @@ class MainActivity : Activity() {
     }
 
     private fun setPill(v: TextView, primary: Boolean) {
-        v.setTextColor(if (primary) pal.canvas else pal.ink)
-        v.background = round(if (primary) pal.ink else pal.canvas, 40, pal.border, if (primary) 0 else dp(1))
+        val action = Color.parseColor(if (pal.dark) "#E88942" else "#E97825")
+        v.setTextColor(if (primary) Color.WHITE else pal.ink)
+        v.background = round(if (primary) action else pal.surface, 40,
+            if (primary) action else pal.border, if (primary) 0 else dp(1))
     }
 
     private fun card(): LinearLayout = GlowCard(
@@ -691,7 +693,7 @@ class MainActivity : Activity() {
     private fun updateStatusBar(forceCanvas: Boolean = false) {
         val paperOn = !forceCanvas && !pal.dark && tab == 1 && Store.schedules(this).isEmpty()
         val to = when {
-            paperOn -> Color.parseColor("#F4F1EA")
+            paperOn -> pal.canvas
             !forceCanvas && (tab == 0 || tab == 1) -> FocusTheme.bg(pal.dark)
             else -> pal.canvas
         }
@@ -2359,17 +2361,17 @@ class MainActivity : Activity() {
         private val icon = ImageView(ctx)
         private val name = tv("", 16f, fonts.semi, pal.ink)
         private val toggle = ToggleView(ctx)
+        private val tile = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
         private var pkg = ""
 
         init {
             layoutParams = AbsListView.LayoutParams(matchP, wrapC)
             setPadding(0, 0, 0, dp(8))
-            val tile = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                background = round(pal.surface, 16, pal.border, dp(1))
-                setPadding(dp(16), dp(12), dp(16), dp(12))
-            }
+            tile.background = round(pal.surface, 18, pal.border, dp(1))
             icon.outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
                     outline.setRoundRect(0, 0, view.width, view.height, dp(12).toFloat())
@@ -2400,7 +2402,11 @@ class MainActivity : Activity() {
             pkg = a.pkg
             name.text = a.label
             icon.setImageBitmap(a.icon)
-            toggle.setOn(appIsOn(a.pkg), false)
+            val enabled = appIsOn(a.pkg)
+            tile.background = if (enabled) {
+                round(FocusTheme.accentSoft(pal.dark), 18, FocusTheme.cardEdge(pal.dark), dp(1))
+            } else round(pal.surface, 18, pal.border, dp(1))
+            toggle.setOn(enabled, false)
         }
     }
 

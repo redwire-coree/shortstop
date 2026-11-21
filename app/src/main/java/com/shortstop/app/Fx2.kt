@@ -33,7 +33,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /*
- * More react-bits ports, still black and white only. Settings follow the ones picked on reactbits.dev:
+ * More react-bits ports, styled with the shared warm Shortstop palette. Settings follow the ones picked on reactbits.dev:
  *  HoldButton   -> HoldPill        (hold 2s, release 200ms, press scale 0.97, wave 6, glow, radius 14)
  *  SlideCommit  -> SlideCommit     (height 56, radius 28, return bounce 0.38, landing dip 0.026)
  *  FuseButton   -> FuseButton      (radius 22, undo window 4000ms, outline fuse 1.5, crossfade 200ms)

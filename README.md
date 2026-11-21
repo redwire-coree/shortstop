@@ -30,7 +30,7 @@ Facebook's IDs are the most volatile; the selected-"Reels"-tab check is the fall
 - Per-app toggles, and a daily time allowance per app (for example 10 min of Reels, then blocked).
 - Schedules: block only inside windows (work, study, midnight to 6 AM), with day-of-week chips. Windows can cross midnight.
 - 7-day chart and weekly summary.
-- Light, dark or system theme. Arc-style grain, scalloped dividers and sticker.
+- Light, dark or system theme. Warm cream-and-espresso surfaces, restrained citrus accents, arc-style grain, scalloped dividers and sticker.
 - Adaptive icon with a themed (monochrome) version for Android 13+.
 
 ## Detection notes

@@ -20,10 +20,12 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
     private val softness = 0.6f
     private val linger = 1f
     private val hold = 1.6f
-    private val contrast = 1.15f
+    private val contrast = 1.08f
 
-    private val ink = if (dark) Color.parseColor("#F4F1EA") else Color.parseColor("#120F17")
-    private val paper = if (dark) Color.parseColor("#09090B") else Color.parseColor("#F4F1EA")
+    // Keep the page matte separate from the portrait's warmer two-tone ink.
+    private val ink = if (dark) Color.parseColor("#FFEFD9") else Color.parseColor("#4A2A12")
+    private val toneLight = if (dark) Color.parseColor("#D99A65") else Color.parseColor("#E7A16C")
+    private val paper = if (dark) Color.parseColor("#21170F") else Color.parseColor("#FFF8F0")
 
     private var src: Bitmap? = null
     private var layer: Bitmap? = null      // backdrop + full-colour photo
@@ -124,7 +126,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
         lc.drawBitmap(photo, dst.left, dst.top, paint)
         layer = lay
 
-        // dither: Floyd-Steinberg (serpentine), 1-bit duotone
+        // dither: Floyd-Steinberg (serpentine), 1-bit warm duotone
         cols = ceil(w / cell.toFloat()).toInt(); rows = ceil(h / cell.toFloat()).toInt()
         val samp = Bitmap.createBitmap(cols, rows, Bitmap.Config.ARGB_8888)
         val sc = Canvas(samp)
@@ -147,7 +149,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
                 val err = old - q
                 val inImg = (x + 0.5f) * cell >= dst.left && (x + 0.5f) * cell <= dst.right &&
                     (y + 0.5f) * cell >= dst.top && (y + 0.5f) * cell <= dst.bottom
-                base[p] = if (inImg || key) mix(ink, paper, q) else ink
+                base[p] = if (inImg || key) mix(ink, toneLight, q) else ink
                 fun add(dx: Int, dy: Int, k: Float) {
                     val nx = x + dx * dir; val ny = y + dy
                     if (nx < 0 || nx >= cols || ny >= rows) return

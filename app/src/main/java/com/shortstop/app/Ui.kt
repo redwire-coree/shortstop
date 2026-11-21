@@ -5,7 +5,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
 
-/** Black-and-white palette (light and dark) following the Easlo design file. No accent colour. */
+/** Warm paper-and-citrus palette shared by every tab, with a restrained espresso dark theme. */
 class Palette(ctx: Context) {
     val dark: Boolean = when (Store.theme(ctx)) {
         1 -> false
@@ -13,12 +13,12 @@ class Palette(ctx: Context) {
         else -> (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
     }
-    val canvas = Color.parseColor(if (dark) "#09090B" else "#FFFFFF")
-    val ink = Color.parseColor(if (dark) "#FAFAFA" else "#000000")
-    val muted = Color.parseColor(if (dark) "#A1A1AA" else "#666666")
-    val surface = Color.parseColor(if (dark) "#141417" else "#F5F5F5")
-    val border = Color.parseColor(if (dark) "#27272C" else "#E5E5E5")
-    val track = if (dark) Color.argb(46, 255, 255, 255) else Color.argb(36, 0, 0, 0)  // translucent so it blends with whatever is behind
+    val canvas = Color.parseColor(if (dark) "#21170F" else "#FFF8F0")
+    val ink = Color.parseColor(if (dark) "#F8EBDD" else "#4A2A12")
+    val muted = Color.parseColor(if (dark) "#C2AA94" else "#8A725F")
+    val surface = Color.parseColor(if (dark) "#302116" else "#FFFCF8")
+    val border = Color.parseColor(if (dark) "#493323" else "#F0E2D2")
+    val track = Color.parseColor(if (dark) "#59402D" else "#F4E5D4")
 }
 
 /** Inter in four weights, bundled in assets/fonts, with system fallbacks. */
