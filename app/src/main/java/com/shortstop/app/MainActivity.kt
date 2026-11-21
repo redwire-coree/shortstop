@@ -224,10 +224,56 @@ class MainActivity : Activity() {
     // ---------- lifecycle ----------
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        installCrashLog()
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         fonts = Fonts(this)
         buildAll()
         loadApps()
+        showLastCrash()
+    }
+
+    // ---------- crash notes: the reason is saved, then shown once on the next start so it can be fixed ----------
+    private fun installCrashLog() {
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                val sb = StringBuilder("v" + try { packageManager.getPackageInfo(packageName, 0).versionName } catch (x: Exception) { "?" })
+                sb.append("\n").append(e.toString()).append("\n")
+                e.stackTrace.take(14).forEach { sb.append("  at ").append(it).append("\n") }
+                var c = e.cause
+                var depth = 0
+                while (c != null && depth < 2) {
+                    sb.append("Caused by: ").append(c.toString()).append("\n")
+                    c.stackTrace.take(8).forEach { sb.append("  at ").append(it).append("\n") }
+                    c = c.cause; depth++
+                }
+                java.io.File(filesDir, "last_crash.txt").writeText(sb.toString())
+            } catch (x: Throwable) { }
+            prev?.uncaughtException(t, e)
+        }
+    }
+
+    private fun showLastCrash() {
+        val f = java.io.File(filesDir, "last_crash.txt")
+        val text = try { if (f.exists()) f.readText() else null } catch (e: Exception) { null } ?: return
+        try { f.delete() } catch (e: Exception) { }
+        window.decorView.postDelayed({
+            try {
+                val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                box.addView(tv("Shortstop closed unexpectedly last time. Copy this and send it so it can be fixed.", 13f, fonts.regular, pal.muted))
+                box.addView(tv(text, 11f, fonts.regular, pal.ink).apply {
+                    typeface = Typeface.MONOSPACE
+                    setTextIsSelectable(true)
+                    setPadding(0, dp(12), 0, dp(12))
+                })
+                box.addView(pill("Copy details", true) {
+                    (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("crash", text))
+                    toast("Copied")
+                }, lp(matchP, wrapC))
+                showSheet("Crash details", box)
+            } catch (e: Throwable) { }
+        }, 700)
     }
 
     override fun onResume() {
@@ -2638,7 +2684,7 @@ class MainActivity : Activity() {
         col.addView(rc, lp(matchP, wrapC))
         col.addView(note(earnedText(streak, total, reclaimed)))
         col.addView(note("A clean day is one with no hold-to-open pass taken."))
-        addCardCollection(col)
+        try { addCardCollection(col) } catch (e: Throwable) { }
     }
 
     // ---------- Card collection (Stats, below everything else) ----------
@@ -2664,7 +2710,9 @@ class MainActivity : Activity() {
             idValue = APP_LINK_SHORT,
             tier = i
         )
-        val bmp = ReflectiveCard(this, fonts, data).renderFlat(wPx)
+        val bmp = try { ReflectiveCard(this, fonts, data).renderFlat(wPx) } catch (e: Throwable) {
+            Bitmap.createBitmap(wPx, (wPx * 1.3f).toInt(), Bitmap.Config.ARGB_8888).also { Canvas(it).drawColor(t.c2) }
+        }
         if (artCache.size > 24) artCache.clear()
         artCache[key] = bmp
         return bmp

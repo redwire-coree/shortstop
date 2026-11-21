@@ -46,7 +46,7 @@ class UpwardBlurView(ctx: Context) : View(ctx) {
         midFired = false
         invalidate()
         if (calm) { onMid(); onDone(); return }
-        pool.execute { buildLevels(snapshot) }
+        pool.execute { try { buildLevels(snapshot) } catch (e: Throwable) { } }
         anim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 980
             interpolator = PathInterpolator(0.40f, 0f, 0.18f, 1f)
