@@ -47,8 +47,58 @@ class FocusCardData(
     val line: String,
     val stats: List<Pair<String, String>>,
     val idLabel: String,
-    val idValue: String
+    val idValue: String,
+    val tier: Int = 0
 )
+
+/** Reward tiers. Same metal and lightness everywhere; only the hue and one quiet detail change. */
+class Tier(
+    val name: String,
+    val c1: Int, val c2: Int, val c3: Int,
+    val deep: IntArray,
+    val accent: Int,
+    val ink: Int,
+    val page: Int,
+    val slide: Int,
+    val slideDeep: Int
+)
+
+object Rarity {
+    val tiers: List<Tier> = listOf(
+        Tier("Common", Color.parseColor("#E3F8CB"), Color.parseColor("#D2F0AE"), Color.parseColor("#C6EAA0"),
+            intArrayOf(36, 78, 18), Color.parseColor("#16A34A"), Color.parseColor("#13180E"), Color.parseColor("#E9F7DC"),
+            Color.parseColor("#86EFAC"), Color.parseColor("#14532D")),
+        Tier("Rare", Color.parseColor("#DCEEFF"), Color.parseColor("#C4E0FB"), Color.parseColor("#B1D4F6"),
+            intArrayOf(20, 52, 104), Color.parseColor("#2563EB"), Color.parseColor("#0E1524"), Color.parseColor("#E8F2FE"),
+            Color.parseColor("#93C5FD"), Color.parseColor("#1E3A8A")),
+        Tier("Gold", Color.parseColor("#FCF2C4"), Color.parseColor("#F6E59E"), Color.parseColor("#EED784"),
+            intArrayOf(96, 66, 8), Color.parseColor("#B7791F"), Color.parseColor("#1D1707"), Color.parseColor("#FDF6D8"),
+            Color.parseColor("#FCD34D"), Color.parseColor("#78350F")),
+        Tier("Diamond", Color.parseColor("#D9F7FA"), Color.parseColor("#C0EEF4"), Color.parseColor("#AAE3EE"),
+            intArrayOf(8, 72, 90), Color.parseColor("#0891B2"), Color.parseColor("#07181C"), Color.parseColor("#E4F8FA"),
+            Color.parseColor("#67E8F9"), Color.parseColor("#164E63")),
+        Tier("Mythic", Color.parseColor("#EEE0FC"), Color.parseColor("#DEC9F7"), Color.parseColor("#D0B6F1"),
+            intArrayOf(62, 32, 104), Color.parseColor("#7C3AED"), Color.parseColor("#160C24"), Color.parseColor("#F3EAFD"),
+            Color.parseColor("#C4B5FD"), Color.parseColor("#4C1D95")),
+        Tier("Legendary", Color.parseColor("#FFE3D0"), Color.parseColor("#FFD0AF"), Color.parseColor("#FFBE95"),
+            intArrayOf(112, 48, 10), Color.parseColor("#FF5A1F"), Color.parseColor("#24100A"), Color.parseColor("#FFEBDD"),
+            Color.parseColor("#FDBA74"), Color.parseColor("#7C2D12"))
+    )
+
+    fun of(i: Int): Tier = tiers[i.coerceIn(0, tiers.size - 1)]
+
+    /** Highest tier reached: session length (Rare 60+ min, Diamond 120+ min) or the streak (Gold 3, Mythic 7, Legendary 30 days). */
+    fun tierFor(minutes: Int, streakDays: Int, done: Boolean): Int {
+        if (!done) return 0
+        var t = 0
+        if (minutes >= 60) t = maxOf(t, 1)
+        if (streakDays >= 3) t = maxOf(t, 2)
+        if (minutes >= 120) t = maxOf(t, 3)
+        if (streakDays >= 7) t = maxOf(t, 4)
+        if (streakDays >= 30) t = maxOf(t, 5)
+        return t
+    }
+}
 
 private fun erfF(x: Float): Float {
     val x2 = x * x
@@ -99,9 +149,10 @@ class ReflectiveCard(ctx: Context, private val fonts: Fonts, private val data: F
     private var touching = false
 
     private val tiltDeg = 12f
-    private val ink = Color.parseColor("#13180E")
-    private val muted = Color.argb(150, 19, 24, 14)
-    private val deep = intArrayOf(36, 78, 18)
+    private val tier = Rarity.of(data.tier)
+    private val ink = tier.ink
+    private val muted = Color.argb(150, Color.red(tier.ink), Color.green(tier.ink), Color.blue(tier.ink))
+    private val deep = tier.deep
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val strip = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -128,7 +179,7 @@ class ReflectiveCard(ctx: Context, private val fonts: Fonts, private val data: F
     }
 
     init {
-        contentDescription = "${data.big} focused. ${data.line}"
+        contentDescription = "${tier.name} card. ${data.big} focused. ${data.line}"
     }
 
     override fun onAttachedToWindow() {
@@ -322,7 +373,7 @@ class ReflectiveCard(ctx: Context, private val fonts: Fonts, private val data: F
         // 1. the metal itself: light green steel
         fill.shader = LinearGradient(
             0f, 0f, w * 0.3f, h,
-            intArrayOf(Color.parseColor("#E3F8CB"), Color.parseColor("#D2F0AE"), Color.parseColor("#C6EAA0")),
+            intArrayOf(tier.c1, tier.c2, tier.c3),
             floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP
         )
         c.drawRoundRect(rr, r, r, fill)
@@ -369,6 +420,9 @@ class ReflectiveCard(ctx: Context, private val fonts: Fonts, private val data: F
         strip(c, r, w, h, k, tqx, tqy, 0f, -0.6f, 1f, 0f, 0.12f, 0.08f, 255, 255, 255, 0.5f)
         strip(c, r, w, h, k, tqx, tqy, 0.46f, 0f, 0f, 1f, 0.05f, 0.07f, 255, 255, 255, 0.22f)
 
+        // 4b. the quiet rarity detail
+        drawRarityLayer(c, w, h, u, ax)
+
         // 5. glare that follows the finger
         if (glare > 0.01f) {
             val gx = w / 2f + pnx * w / 2f
@@ -401,6 +455,7 @@ class ReflectiveCard(ctx: Context, private val fonts: Fonts, private val data: F
         stroke.shader = null
 
         drawContent(c, w, h, u)
+        drawRarityTop(c, w, h, u, ax, ay)
 
         // 7. thin rim and the highlight along the top edge
         tmpRect.set(u * 0.5f, u * 0.5f, w - u * 0.5f, h - u * 0.5f)
@@ -416,6 +471,106 @@ class ReflectiveCard(ctx: Context, private val fonts: Fonts, private val data: F
         )
         c.drawRoundRect(tmpRect, r - u * 1.5f, r - u * 1.5f, stroke)
         stroke.shader = null
+    }
+
+    private fun spark(c: Canvas, cx: Float, cy: Float, rad: Float, alpha: Int) {
+        fill.shader = RadialGradient(cx, cy, rad * 2.2f, Color.argb(alpha / 2, 255, 255, 255), Color.argb(0, 255, 255, 255), Shader.TileMode.CLAMP)
+        c.drawCircle(cx, cy, rad * 2.2f, fill)
+        path.reset()
+        path.moveTo(cx, cy - rad)
+        path.quadTo(cx, cy, cx + rad, cy)
+        path.quadTo(cx, cy, cx, cy + rad)
+        path.quadTo(cx, cy, cx - rad, cy)
+        path.quadTo(cx, cy, cx, cy - rad)
+        fill.shader = null
+        fill.color = Color.argb(alpha, 255, 255, 255)
+        c.drawPath(path, fill)
+    }
+
+    /** Detail that sits under the text: frame, foil, facets, sheen, glow. */
+    private fun drawRarityLayer(c: Canvas, w: Float, h: Float, u: Float, ax: Float) {
+        val r = 22f * u
+        when (data.tier) {
+            1 -> {
+                stroke.shader = null
+                stroke.strokeWidth = u
+                stroke.color = Color.argb(72, deep[0], deep[1], deep[2])
+                tmpRect.set(9f * u, 9f * u, w - 9f * u, h - 9f * u)
+                c.drawRoundRect(tmpRect, 15f * u, 15f * u, stroke)
+                stroke.color = Color.argb(120, 255, 255, 255)
+                tmpRect.inset(u, u)
+                c.drawRoundRect(tmpRect, 14f * u, 14f * u, stroke)
+            }
+            2 -> {
+                val sh = -ax * w * 0.18f
+                fill.shader = LinearGradient(sh + w * 0.1f, 0f, sh + w * 1.0f, h * 0.5f,
+                    intArrayOf(Color.argb(0, 255, 244, 190), Color.argb(0, 255, 244, 190), Color.argb(150, 255, 244, 190), Color.argb(0, 255, 244, 190), Color.argb(0, 255, 244, 190)),
+                    floatArrayOf(0f, 0.5f, 0.62f, 0.74f, 1f), Shader.TileMode.CLAMP)
+                c.drawRoundRect(rr, r, r, fill)
+                fill.shader = LinearGradient(0f, 0f, 0f, h * 0.4f, Color.argb(46, 255, 225, 120), Color.argb(0, 255, 225, 120), Shader.TileMode.CLAMP)
+                c.drawRoundRect(rr, r, r, fill)
+            }
+            3 -> {
+                fun f(x: Float) = x * u
+                fill.shader = null
+                fill.color = Color.argb(30, 255, 255, 255)
+                path.reset()
+                path.moveTo(f(300f), f(285f)); path.lineTo(f(266f), f(345f)); path.lineTo(f(212f), f(345f)); path.close()
+                path.moveTo(f(212f), f(345f)); path.lineTo(f(252f), f(390f)); path.lineTo(f(300f), f(390f)); path.lineTo(f(300f), f(345f)); path.close()
+                c.drawPath(path, fill)
+                stroke.shader = null
+                stroke.strokeWidth = u
+                stroke.color = Color.argb(150, 255, 255, 255)
+                path.reset()
+                path.moveTo(f(300f), f(285f)); path.lineTo(f(212f), f(345f)); path.lineTo(f(300f), f(390f))
+                path.moveTo(f(212f), f(345f)); path.lineTo(f(300f), f(345f))
+                path.moveTo(f(212f), f(345f)); path.lineTo(f(252f), f(390f))
+                path.moveTo(f(300f), f(285f)); path.lineTo(f(266f), f(345f))
+                c.drawPath(path, stroke)
+            }
+            4 -> {
+                val sh = -ax * w * 0.4f
+                fill.shader = LinearGradient(sh, 0f, sh + w * 1.1f, h * 0.7f,
+                    intArrayOf(Color.argb(0, 255, 120, 200), Color.argb(70, 255, 150, 210), Color.argb(70, 120, 200, 255), Color.argb(60, 190, 255, 200), Color.argb(0, 255, 120, 200)),
+                    floatArrayOf(0.05f, 0.3f, 0.5f, 0.68f, 0.92f), Shader.TileMode.CLAMP)
+                c.drawRoundRect(rr, r, r, fill)
+            }
+            5 -> {
+                fill.shader = RadialGradient(w / 2f, -0.06f * h, w * 0.95f,
+                    Color.argb(120, 255, 150, 70), Color.argb(0, 255, 150, 70), Shader.TileMode.CLAMP)
+                c.drawRoundRect(rr, r, r, fill)
+            }
+        }
+        fill.shader = null
+        stroke.shader = null
+    }
+
+    /** Detail that sits over the text: sparkles and the ember rim. */
+    private fun drawRarityTop(c: Canvas, w: Float, h: Float, u: Float, ax: Float, ay: Float) {
+        val twinkle = 0.78f + 0.22f * sin((ax * 2.4f + ay) * 2.2f)
+        val a = (235 * twinkle).toInt()
+        when (data.tier) {
+            2 -> {
+                spark(c, w - 31f * u - ax * 6f * u, 57f * u, 8.5f * u, a)
+                spark(c, w - 59f * u - ax * 9f * u, 79f * u, 4.2f * u, a - 30)
+            }
+            4 -> {
+                spark(c, w - 31f * u - ax * 6f * u, 59f * u, 7.5f * u, a)
+                spark(c, w * 0.5f - ax * 10f * u, h * 0.385f, 4f * u, a - 40)
+            }
+            5 -> {
+                spark(c, w - 30f * u - ax * 6f * u, 56f * u, 8f * u, a)
+                val bw = 2.5f * u
+                tmpRect.set(bw / 2f, bw / 2f, w - bw / 2f, h - bw / 2f)
+                stroke.strokeWidth = bw
+                stroke.shader = LinearGradient(0f, 0f, w, h,
+                    intArrayOf(Color.parseColor("#FFB27A"), Color.argb(0, 255, 106, 43), Color.argb(0, 255, 106, 43), Color.parseColor("#FF6A2B")),
+                    floatArrayOf(0f, 0.38f, 0.62f, 1f), Shader.TileMode.CLAMP)
+                c.drawRoundRect(tmpRect, 22f * u - bw / 2f, 22f * u - bw / 2f, stroke)
+                stroke.shader = null
+            }
+        }
+        fill.shader = null
     }
 
     private fun drawContent(c: Canvas, w: Float, h: Float, u: Float) {
@@ -438,11 +593,26 @@ class ReflectiveCard(ctx: Context, private val fonts: Fonts, private val data: F
         c.drawPath(path, stroke)
         text(c, data.badge, pad + 22f * u, rowY + 4.6f * u, 13f * u, fonts.medium, ink)
 
-        text(c, data.status, w - pad, rowY + 4.6f * u, 13f * u, fonts.regular, muted, Paint.Align.RIGHT)
-        val sw = tp.measureText(data.status)
-        fill.shader = null
-        fill.color = green
-        c.drawCircle(w - pad - sw - 9f * u, rowY, 3.2f * u, fill)
+        if (data.status == "Done") {
+            // rarity: six pips (one more lit per tier) and the tier name
+            text(c, tier.name.uppercase(), w - pad, rowY + 4f * u, 10.5f * u, fonts.semi,
+                Color.argb(220, deep[0], deep[1], deep[2]), Paint.Align.RIGHT, 0.14f)
+            val nameW = tp.measureText(tier.name.uppercase())
+            fill.shader = null
+            val pr = 2f * u
+            var px0 = w - pad - nameW - 10f * u - pr
+            for (i in 5 downTo 0) {
+                fill.color = if (i <= data.tier) tier.accent else Color.argb(56, deep[0], deep[1], deep[2])
+                c.drawCircle(px0, rowY, pr, fill)
+                px0 -= pr * 2f + 2.5f * u
+            }
+        } else {
+            text(c, data.status, w - pad, rowY + 4.6f * u, 13f * u, fonts.regular, muted, Paint.Align.RIGHT)
+            val sw = tp.measureText(data.status)
+            fill.shader = null
+            fill.color = green
+            c.drawCircle(w - pad - sw - 9f * u, rowY, 3.2f * u, fill)
+        }
 
         // footer: link on the left, tile on the right
         val tile = 44f * u
@@ -514,7 +684,7 @@ class ReflectiveCard(ctx: Context, private val fonts: Fonts, private val data: F
         val bmp = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val bg = Paint()
-        bg.shader = LinearGradient(0f, 0f, 0f, bh.toFloat(), Color.parseColor("#E9F7DC"), Color.WHITE, Shader.TileMode.CLAMP)
+        bg.shader = LinearGradient(0f, 0f, 0f, bh.toFloat(), tier.page, Color.WHITE, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, bw.toFloat(), bh.toFloat(), bg)
         val cw = 780f
         val ch = cw * ratio

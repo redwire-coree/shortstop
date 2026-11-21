@@ -1260,9 +1260,11 @@ class MainActivity : Activity() {
                 "Blocked" to Store.total(this).toString()
             ),
             idLabel = "Get Shortstop",
-            idValue = APP_LINK_SHORT
+            idValue = APP_LINK_SHORT,
+            tier = Rarity.tierFor(last.minutes, streak, last.done)
         )
         val card = ReflectiveCard(this, fonts, data)
+        if (data.tier > 0) toast("${Rarity.of(data.tier).name} card", "Earned with this session.")
         box.addView(card, lp(matchP, wrapC))
         val heartRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         heartRow.addView(tv("Keep this session", 14f, fonts.regular, pal.muted), lp(0, wrapC, 1f))
@@ -1554,7 +1556,8 @@ class MainActivity : Activity() {
                 "Sessions" to sessions.size.toString()
             ),
             idLabel = "Get Shortstop",
-            idValue = APP_LINK_SHORT
+            idValue = APP_LINK_SHORT,
+            tier = Rarity.tierFor(s.minutes, Store.streak(this), s.done)
         )
         val card = ReflectiveCard(this, fonts, data)
         box.addView(card, lp(matchP, wrapC))
@@ -1568,6 +1571,7 @@ class MainActivity : Activity() {
         val slide = SlideCommit(this, pal, fonts, "Slide to share", "Sharing", { true }) {
             shareFocusCard(this, card, shareText)
         }
+        Rarity.of(data.tier).let { slide.accent = it.slide; slide.deep = it.slideDeep }
         box.addView(slide, lp(matchP, wrapC).apply { bottomMargin = dp(4) })
         showSheet("Focus session", box)
     }

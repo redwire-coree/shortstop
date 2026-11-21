@@ -145,8 +145,8 @@ class ShortsBlockerService : AccessibilityService() {
 
         // 2. Any app the person picked (always-on list, or the focus list during focus)
         val studyYoutube = hardNow && Store.studyMode(this) && pkg == "com.google.android.youtube"
-        val inFocus = hardNow && pkg in focusCache && !studyYoutube
-        if (pkg in appsCache || inFocus) {
+        val inFocus = hardNow && Store.isFocusApp(this, pkg) && !studyYoutube
+        if (Store.isAppBlocked(this, pkg) || inFocus) {
             val key = Store.appKey(pkg)
             if (inFocus || Store.isActive(this, key)) {
                 handleHit(null, key, pkg)
@@ -225,7 +225,7 @@ class ShortsBlockerService : AccessibilityService() {
     }
 
     private fun isBrowser(pkg: String): Boolean =
-        BROWSER_IDS.containsKey(pkg) || BROWSERISH.any { pkg.contains(it) }
+        BROWSER_IDS.containsKey(pkg) || pkg.split('.').any { it in BROWSERISH }
 
     private fun matchBlocked(host: String): String? {
         for (d in sitesCache) if (host == d || host.endsWith(".$d")) return d
@@ -300,7 +300,7 @@ class ShortsBlockerService : AccessibilityService() {
             if ("youtube" !in keys) keys.add("youtube")
             if ("youtube_home" !in keys) keys.add("youtube_home")
         }
-        val focusWhole = hardNow && pkg in focusCache && !studyYoutube
+        val focusWhole = hardNow && Store.isFocusApp(this, pkg) && !studyYoutube
         if (!focusWhole && keys.isEmpty()) return null
 
         val root = rootInActiveWindow ?: return null
@@ -595,7 +595,7 @@ class ShortsBlockerService : AccessibilityService() {
         )
 
         private val BROWSERISH = listOf(
-            "browser", "chrome", "firefox", "opera", "brave", "vivaldi", "duckduckgo", "edge", "emmx", "samsung.android.app.sbrowser"
+            "browser", "chrome", "firefox", "opera", "brave", "vivaldi", "duckduckgo", "emmx", "sbrowser", "fenix"
         )
         private val URL_HINTS = listOf(
             "url_bar", "url_field", "urlbar", "omnibox", "location_bar", "address", "toolbar_url", "url_view", "search_box"
