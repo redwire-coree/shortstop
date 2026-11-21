@@ -546,6 +546,9 @@ class FuseButton(
     private val pm = PathMeasure()
     private val pt = FloatArray(2)
 
+    /** Soft fill and edge colors, for screens with their own palette. */
+    fun tint(fill: Int, edge: Int) { bg.color = fill; ring.color = edge; invalidate() }
+
     private fun shown(): String = when (state) { 1 -> undoLabel; 2 -> doneLabel; else -> text }
 
     override fun onMeasure(w: Int, h: Int) {

@@ -170,3 +170,19 @@ class TagIcon(ctx: Context, private val name: String, private val dark: Boolean)
         c.drawPath(path, p)
     }
 }
+
+/** Two faint peach clouds that sit behind the running-session content. Static, so it costs nothing per frame. */
+class SoftClouds(ctx: Context, private val dark: Boolean) : View(ctx) {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private fun blob(c: Canvas, cx: Float, cy: Float, r: Float) {
+        val a = if (dark) 46 else 120
+        p.shader = android.graphics.RadialGradient(cx, cy, r,
+            android.graphics.Color.argb(a, 255, 178, 122), android.graphics.Color.argb(0, 255, 178, 122), Shader.TileMode.CLAMP)
+        c.drawCircle(cx, cy, r, p)
+    }
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat(); val h = height.toFloat()
+        blob(c, w * 0.12f, h * 0.10f, w * 0.55f)
+        blob(c, w * 0.92f, h * 0.88f, w * 0.6f)
+    }
+}

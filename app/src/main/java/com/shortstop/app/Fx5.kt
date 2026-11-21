@@ -46,6 +46,9 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
 
     fun stop() { live = false }
 
+    /** Running-session dial only: orange arc on a peach track. */
+    var emberArc = false
+
     // Goal mode: the same dial, but the arc shows progress toward a goal instead of a running clock.
     private var goalMode = false
     private var goalFrac = 0f
@@ -145,14 +148,17 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         c.drawCircle(cx, cy, faceR - 0.5f * d, faceEdge)
 
         track.strokeWidth = sw
-        track.alpha = 120
+        track.color = if (emberArc) FocusCardColors.peach(pal.dark) else pal.track
+        track.alpha = if (emberArc) 255 else 120
+        val arcBase = if (emberArc) FocusCardColors.ORANGE_B else pal.ink
+        head.color = arcBase
         rect.set(cx - r, cy - r, cx + r, cy + r)
         c.drawOval(rect, track)
 
         // arc with a comet tail: faint where it starts, solid at the head
         arc.strokeWidth = sw
         if (frac > 0.0005f) {
-            val ink = pal.ink
+            val ink = arcBase
             val tail = Color.argb(if (calm) 30 else 46, Color.red(ink), Color.green(ink), Color.blue(ink))
             val headC = Color.argb(if (calm) 110 else 255, Color.red(ink), Color.green(ink), Color.blue(ink))
             val sg = SweepGradient(cx, cy, intArrayOf(tail, headC), floatArrayOf(0f, maxOf(frac, 0.01f)))
@@ -171,7 +177,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
             val pulse = 0.5f + 0.5f * Math.sin(now / 520.0).toFloat()
             val hr = (13f + 4f * pulse) * d
             if (haloShader == null) {
-                val ik = pal.ink
+                val ik = arcBase
                 haloShader = RadialGradient(
                     0f, 0f, 1f, Color.argb(90, Color.red(ik), Color.green(ik), Color.blue(ik)),
                     Color.argb(0, Color.red(ik), Color.green(ik), Color.blue(ik)), Shader.TileMode.CLAMP

@@ -1091,19 +1091,24 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(20), dp(28), dp(20), dp(24))
         }
-        val stat = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val lat = LatticeLoader(this, pal.ink)
+        val stat = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = round(FocusCardColors.peachSoft(pal.dark), 40)
+            setPadding(dp(12), dp(7), dp(14), dp(7))
+        }
+        val lat = LatticeLoader(this, FocusCardColors.ORANGE)
         runLattice = lat
         stat.addView(lat, lp(wrapC, wrapC).apply { marginEnd = dp(10) })
-        val rl = tv("Focusing", 14f, fonts.medium, pal.ink)
+        val rl = tv("Focusing", 13f, fonts.semi, pal.ink)
         runLabel = rl
         stat.addView(rl, lp(wrapC, wrapC))
         val re = tv("", 13f, fonts.regular, pal.muted)
         runElapsed = re
-        stat.addView(re, lp(wrapC, wrapC).apply { marginStart = dp(10) })
+        stat.addView(re, lp(wrapC, wrapC).apply { marginStart = dp(8) })
         run.addView(stat, lp(wrapC, wrapC).apply { bottomMargin = dp(18) })
         val ring = TimerDial(this, pal, fonts)
         runRing = ring
+        ring.emberArc = true
         run.addView(ring, lp(wrapC, wrapC))
         val info = tv("", 14f, fonts.regular, pal.muted, Gravity.CENTER).apply { setPadding(0, dp(18), 0, dp(16)) }
         runInfo = info
@@ -1121,14 +1126,18 @@ class MainActivity : Activity() {
         runEndBtn = endBtn
         breakBtn.setSingleLine(true)
         breakBtn.setPadding(dp(12), 0, dp(12), 0)
+        breakBtn.setTextColor(if (pal.dark) 0xFFFFD9B8.toInt() else 0xFF8A3E10.toInt())
+        breakBtn.background = round(FocusCardColors.peach(pal.dark), 40)
+        endBtn.tint(FocusTheme.cardFill(pal.dark), FocusTheme.cardEdge(pal.dark))
         btns.addView(breakBtn, lp(0, dp(50), 1f).apply { marginEnd = dp(8) })
         btns.addView(endBtn, lp(0, dp(50), 1f))
         run.addView(btns, lp(matchP, wrapC))
         val runWrap = FrameLayout(this).apply {
-            background = round(pal.surface, 24, pal.border, dp(1))
+            background = round(FocusTheme.cardFill(pal.dark), 24, FocusTheme.cardEdge(pal.dark), dp(1))
             clipToOutline = true
             visibility = View.GONE
         }
+        runWrap.addView(SoftClouds(this, pal.dark), FrameLayout.LayoutParams(matchP, matchP))
         runWrap.addView(run, FrameLayout.LayoutParams(matchP, wrapC))
         runningCard = runWrap
         col.addView(runWrap, lp(matchP, wrapC).apply { topMargin = dp(18) })
@@ -1137,22 +1146,33 @@ class MainActivity : Activity() {
         val extras = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
         fun tile(label: String): Pair<View, TextView> {
-            val t = card().apply { setPadding(dp(14), dp(16), dp(14), dp(16)); gravity = Gravity.CENTER_HORIZONTAL }
-            val v = tv("", 20f, fonts.bold, pal.ink, Gravity.CENTER).apply { letterSpacing = -0.02f; setSingleLine(); minHeight = dp(28) }
+            val t = card().apply {
+                setPadding(dp(8), dp(16), dp(8), dp(14)); gravity = Gravity.CENTER_HORIZONTAL
+                background = round(FocusTheme.cardFill(pal.dark), 20, FocusTheme.cardEdge(pal.dark), dp(1))
+            }
+            val v = tv("", 20f, fonts.bold, FocusTheme.title(pal.dark), Gravity.CENTER).apply { letterSpacing = -0.02f; setSingleLine(); minHeight = dp(28) }
             t.addView(v, lp(matchP, wrapC))
-            t.addView(tv(label, 12f, fonts.medium, pal.muted, Gravity.CENTER).apply { setPadding(0, dp(6), 0, 0) }, lp(matchP, wrapC))
+            t.addView(View(this).apply { background = round(FocusCardColors.ORANGE, 4) }, lp(dp(16), dp(3)).apply { topMargin = dp(6); gravity = Gravity.CENTER_HORIZONTAL })
+            t.addView(tv(label, 11f, fonts.medium, pal.muted, Gravity.CENTER).apply { setSingleLine(); setPadding(0, dp(7), 0, 0) }, lp(matchP, wrapC))
             return t to v
         }
-        val (t1, v1) = tile("Today"); val (t2, v2) = tile("Streak"); val (t3, v3) = tile("Blocked")
+        val (t1, v1) = tile("Focus today"); val (t2, v2) = tile("Day streak"); val (t3, v3) = tile("Apps blocked")
         exToday = v1; exStreak = v2; exBlocked = v3
         tiles.addView(t1, lp(0, matchP, 1f).apply { marginEnd = dp(10) })
         tiles.addView(t2, lp(0, matchP, 1f).apply { marginEnd = dp(10) })
         tiles.addView(t3, lp(0, matchP, 1f))
         extras.addView(tiles, lp(matchP, wrapC).apply { topMargin = dp(14) })
-        val blocking = card().apply { setPadding(dp(20), dp(16), dp(20), dp(8)) }
-        blocking.addView(tv("Blocking now", 15f, fonts.semi, pal.ink).apply { setPadding(0, 0, 0, dp(10)) }, lp(matchP, wrapC))
+        val blocking = card().apply {
+            setPadding(dp(20), dp(16), dp(20), dp(8))
+            background = round(FocusTheme.cardFill(pal.dark), 24, FocusTheme.cardEdge(pal.dark), dp(1))
+        }
+        val bh = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(6)) }
+        bh.addView(View(this).apply { background = round(FocusCardColors.ORANGE, 8) }, lp(dp(8), dp(8)).apply { marginEnd = dp(10) })
+        bh.addView(tv("Blocking now", 15f, fonts.semi, pal.ink))
+        blocking.addView(bh, lp(matchP, wrapC))
         fun kv(label: String): TextView {
-            val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(10)) }
+            if (blocking.childCount > 1) blocking.addView(View(this).apply { setBackgroundColor(FocusTheme.cardEdge(pal.dark)) }, lp(matchP, dp(1)))
+            val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(11), 0, dp(11)) }
             r.addView(tv(label, 14f, fonts.regular, pal.muted), lp(0, wrapC, 1f))
             val v = tv("", 14f, fonts.semi, pal.ink)
             r.addView(v, lp(wrapC, wrapC))
