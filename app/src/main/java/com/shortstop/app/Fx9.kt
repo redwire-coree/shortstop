@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.Shader
 import android.os.SystemClock
@@ -25,6 +26,20 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette) : View(ctx) {
     private var shB: RadialGradient? = null
     private var sw = 0f
     private val m = Matrix()
+    private val cloud = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val clouds = ArrayList<Path>()
+    private val calm = FocusTheme.reducedMotion(ctx)
+    private val d = ctx.resources.displayMetrics.density
+
+    /** Soft puffy shapes: three overlapping circles merged into one path so the edges never double up. */
+    private fun puff(r: Float): Path {
+        val a = Path().apply { addCircle(0f, 0f, r, Path.Direction.CW) }
+        val b = Path().apply { addCircle(r * 0.95f, r * 0.22f, r * 0.72f, Path.Direction.CW) }
+        val c = Path().apply { addCircle(-r * 0.8f, r * 0.34f, r * 0.62f, Path.Direction.CW) }
+        a.op(b, Path.Op.UNION)
+        a.op(c, Path.Op.UNION)
+        return a
+    }
 
     init {
         val n = 128
@@ -63,7 +78,29 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette) : View(ctx) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (shA == null || sw != w) build(w)
-        val t = SystemClock.uptimeMillis() / 1000f
+        val t = if (calm) 0f else SystemClock.uptimeMillis() / 1000f
+        c.drawColor(FocusTheme.bg(pal.dark))
+        if (clouds.isEmpty()) {
+            for (r in floatArrayOf(46f, 92f, 38f, 70f)) clouds.add(puff(r * d))
+        }
+        cloud.color = Color.argb(if (pal.dark) 40 else 52, 255, 154, 61)
+        // x, y (fraction of the page), drift period, phase
+        val spots = arrayOf(
+            floatArrayOf(0.06f, 0.10f, 9.0f, 0f), floatArrayOf(-0.02f, 0.52f, 11.0f, 1.7f),
+            floatArrayOf(0.98f, 0.30f, 8.0f, 3.1f), floatArrayOf(0.96f, 0.80f, 12.0f, 4.4f)
+        )
+        for (i in spots.indices) {
+            val sp = spots[i]
+            val k = t * 6.2832f / sp[2] + sp[3]
+            // eased bob: a sine of a sine gives a soft, springy float rather than a mechanical sway
+            val bob = Math.sin(k.toDouble() + 0.6 * Math.sin(k * 1.7)).toFloat()
+            c.save()
+            c.translate(w * sp[0] + bob * 7f * d, h * sp[1] + Math.cos(k.toDouble()).toFloat() * 9f * d)
+            val sc = 1f + 0.025f * bob
+            c.scale(sc, sc)
+            c.drawPath(clouds[i], cloud)
+            c.restore()
+        }
         m.setTranslate(w * (0.5f + 0.12f * Math.sin(t * 0.22).toFloat()), h * (0.26f + 0.03f * Math.cos(t * 0.19).toFloat()))
         shA!!.setLocalMatrix(m)
         c.drawRect(0f, 0f, w, h, glowA)
@@ -71,6 +108,6 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette) : View(ctx) {
         shB!!.setLocalMatrix(m)
         c.drawRect(0f, 0f, w, h, glowB)
         c.drawRect(0f, 0f, w, h, grain)
-        if (isShown) postInvalidateDelayed(50)
+        if (isShown && !calm) postInvalidateDelayed(40)
     }
 }

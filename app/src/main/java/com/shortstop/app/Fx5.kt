@@ -219,6 +219,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
             bigP.textSize = ts
         }
         val base = cy + ts * 0.2f
+        if (goalMode) drawBrand(c, cx, cy, r, base, ts, now)
         roll.draw(c, bigP, cx, base)
         if (small.isNotEmpty()) {
             smallP.textSize = size * 0.058f
@@ -231,9 +232,41 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         }
     }
 
+    private val calmMotion = FocusTheme.reducedMotion(ctx)
+    private var brandStart = 0L
+    private val tickP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = FocusTheme.orange
+    }
+    private val dropIn = SpringInterpolator(13f, 0.42f, 0.9f)
+
+    /** Goal dial only: the green leaf above the digits (it drops in with a bounce, then floats) and two doodle sparks. */
+    private fun drawBrand(c: Canvas, cx: Float, cy: Float, r: Float, base: Float, ts: Float, now: Long) {
+        if (brandStart == 0L) brandStart = now
+        val p = ((now - brandStart) / 900f).coerceIn(0f, 1f)
+        val sc = if (calmMotion) 1f else dropIn.getInterpolation(p)
+        val t = if (calmMotion) 0.0 else now / 1000.0
+        val bob = (Math.sin(t * 2.3) * 1.7f * d).toFloat()
+        val sway = (-16.0 + Math.sin(t * 1.6) * 4.0).toFloat()
+        Leaf.draw(c, cx - 2f * d, base - ts * 0.76f - 3f * d + bob, 25f * d, sway, sc)
+
+        // little spark dashes either side of the ring, nudging outward in turn
+        tickP.strokeWidth = 3.4f * d
+        val angles = floatArrayOf(-158f, -144f, -36f, -22f)
+        for (i in angles.indices) {
+            val nudge = if (calmMotion) 0f else (0.5f + 0.5f * Math.sin(t * 2.6 + i * 1.3).toFloat()) * 2.2f * d
+            val a = Math.toRadians(angles[i].toDouble())
+            val r0 = r + 11f * d + nudge
+            val r1 = r + 19f * d + nudge
+            tickP.alpha = (235 * sc.coerceIn(0f, 1f)).toInt()
+            c.drawLine(cx + r0 * Math.cos(a).toFloat(), cy + r0 * Math.sin(a).toFloat(),
+                cx + r1 * Math.cos(a).toFloat(), cy + r1 * Math.sin(a).toFloat(), tickP)
+        }
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         grain.restartIntro()
+        brandStart = 0L
     }
 
     private fun gx(x: Float) = (x - (faceCx - faceR)) / (2f * faceR)

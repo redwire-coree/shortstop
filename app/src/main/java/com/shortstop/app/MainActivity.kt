@@ -640,7 +640,11 @@ class MainActivity : Activity() {
     /** The status bar takes the paper colour while the empty Schedule shows the veil, so they read as one surface. */
     private fun updateStatusBar(forceCanvas: Boolean = false) {
         val paperOn = !forceCanvas && !pal.dark && tab == 1 && Store.schedules(this).isEmpty()
-        val to = if (paperOn) Color.parseColor("#F4F1EA") else pal.canvas
+        val to = when {
+            paperOn -> Color.parseColor("#F4F1EA")
+            !forceCanvas && tab == 0 -> FocusTheme.bg(pal.dark)
+            else -> pal.canvas
+        }
         if (statusNow == 0) statusNow = window.statusBarColor
         if (to == statusNow) return
         statusAnim?.cancel()
@@ -984,7 +988,14 @@ class MainActivity : Activity() {
         val col = column()
 
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(display("Focus", 30f), lp(0, wrapC, 1f))
+        // Focus heading only: friendly, softly rounded bold letters in warm brown (cream in dark mode)
+        top.addView(display("Focus", 34f).apply {
+            setTextColor(FocusTheme.title(pal.dark))
+            paint.style = Paint.Style.FILL_AND_STROKE
+            paint.strokeJoin = Paint.Join.ROUND
+            paint.strokeWidth = dp(1).toFloat() * 0.9f
+            letterSpacing = -0.01f
+        }, lp(0, wrapC, 1f))
         val chip = CallChip(this, pal, fonts)
         statusChip = chip
         top.addView(chip)
@@ -1320,6 +1331,7 @@ class MainActivity : Activity() {
 
     private fun sectionCard(title: String): LinearLayout {
         val c = card()
+        c.background = round(FocusTheme.cardFill(pal.dark), 24, FocusTheme.cardEdge(pal.dark), dp(1))
         c.addView(tv(title, 15f, fonts.semi, pal.ink).apply { setPadding(0, dp(16), 0, dp(10)) })
         return c
     }
