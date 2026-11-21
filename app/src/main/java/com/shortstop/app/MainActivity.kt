@@ -234,6 +234,10 @@ class MainActivity : Activity() {
         super.onResume()
         Store.finalizeFocus(this)
         refreshStatus()
+        Cards.sync(this).let { got ->
+            if (got.size == 1) toast("${Rarity.of(got[0]).name} card unlocked", "Find it in Stats.")
+            else if (got.size > 1) toast("${got.size} cards unlocked", "Find them in Stats.")
+        }
         fillStats()
         fillFocusStats()
         fillSchedules()
@@ -2627,6 +2631,124 @@ class MainActivity : Activity() {
         col.addView(rc, lp(matchP, wrapC))
         col.addView(note(earnedText(streak, total, reclaimed)))
         col.addView(note("A clean day is one with no hold-to-open pass taken."))
+        addCardCollection(col)
+    }
+
+    // ---------- Card collection (Stats, below everything else) ----------
+    private val artCache = HashMap<String, Bitmap>()
+
+    private fun cardArt(i: Int, at: Long, wPx: Int): Bitmap {
+        val key = "$i|$at|${pal.dark}|$wPx"
+        artCache[key]?.let { return it }
+        val t = Rarity.of(i)
+        val unlocked = at > 0L
+        val data = FocusCardData(
+            badge = "Focus card",
+            status = "Done",
+            eyebrow = if (unlocked) "COLLECTED" else "LOCKED",
+            big = if (unlocked) t.name else "",
+            line = if (unlocked) "Unlocked " + SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(java.util.Date(at)) else "",
+            stats = listOf(
+                "Tier" to "${i + 1} of ${Cards.count}",
+                "Unlocked" to (if (unlocked) SimpleDateFormat("d MMM", Locale.getDefault()).format(java.util.Date(at)) else "–"),
+                "Goal" to Cards.goalLabel(i)
+            ),
+            idLabel = "Get Shortstop",
+            idValue = APP_LINK_SHORT,
+            tier = i
+        )
+        val bmp = ReflectiveCard(this, fonts, data).renderFlat(wPx)
+        if (artCache.size > 24) artCache.clear()
+        artCache[key] = bmp
+        return bmp
+    }
+
+    private fun addCardCollection(col: LinearLayout) {
+        val fresh = Cards.sync(this)
+        val got = Cards.unlockedCount(this)
+        val n = Cards.count
+        val dark = pal.dark
+        val brown = FocusTheme.title(dark)
+        val soft = Color.argb(if (dark) 150 else 160, Color.red(brown), Color.green(brown), Color.blue(brown))
+
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = round(FocusTheme.cardFill(dark), 24, FocusTheme.cardEdge(dark), dp(1))
+            setPadding(dp(16), dp(18), dp(16), dp(10))
+        }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(tv("Card Collection", 20f, fonts.bold, brown).apply { letterSpacing = -0.01f }, lp(0, wrapC, 1f))
+        head.addView(tv("$got/$n collected", 13f, fonts.semi, FocusTheme.orange))
+        panel.addView(head)
+        val bar = OrangeBar(this, FocusTheme.cardEdge(dark))
+        panel.addView(bar, lp(matchP, dp(6)).apply { topMargin = dp(12); bottomMargin = dp(16) })
+        bar.setProgress(got.toFloat() / n, true)
+
+        val wPx = ((resources.displayMetrics.widthPixels - dp(40) - dp(32) - dp(12)) / 2f).toInt().coerceAtLeast(dp(120))
+        var rowBox: LinearLayout? = null
+        for (i in 0 until n) {
+            if (i % 2 == 0) {
+                rowBox = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                panel.addView(rowBox, lp(matchP, wrapC).apply { bottomMargin = dp(14) })
+            }
+            val at = Cards.unlockedAt(this, i)
+            val unlocked = at > 0L
+            val tile = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+            val art = CardArtView(this, cardArt(i, at, wPx), !unlocked)
+            val playNow = unlocked && !Cards.seen(this, i)
+            if (playNow) art.holdLocked()
+            tile.addView(art, lp(matchP, wrapC))
+            tile.addView(tv(Rarity.of(i).name, 15f, fonts.semi, brown, Gravity.CENTER).apply { setPadding(0, dp(10), 0, 0) }, lp(matchP, wrapC))
+            tile.addView(tv(if (unlocked) "Unlocked" else Cards.shortRequirement(i), 12f, fonts.regular, if (unlocked) FocusTheme.orange else soft, Gravity.CENTER)
+                .apply { setPadding(0, dp(2), 0, 0) }, lp(matchP, wrapC))
+            tile.isClickable = true
+            tile.setOnClickListener { showCardSheet(i) }
+            press(tile)
+            if (playNow) {
+                art.postDelayed({
+                    if (art.isShown) { Cards.markSeen(this, i); art.playReveal() }
+                    else art.invalidate()
+                }, 600)
+            }
+            rowBox!!.addView(tile, lp(0, wrapC, 1f).apply { if (i % 2 == 0) marginEnd = dp(12) })
+        }
+        col.addView(panel, lp(matchP, wrapC).apply { topMargin = dp(30) })
+    }
+
+    private fun showCardSheet(i: Int) {
+        val t = Rarity.of(i)
+        val at = Cards.unlockedAt(this, i)
+        val dark = pal.dark
+        val brown = FocusTheme.title(dark)
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, dp(2), 0, dp(6)) }
+        if (at > 0L) {
+            val data = FocusCardData(
+                badge = "Focus card", status = "Done", eyebrow = "COLLECTED", big = t.name,
+                line = "Unlocked " + SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(java.util.Date(at)),
+                stats = listOf("Tier" to "${i + 1} of ${Cards.count}", "Goal" to Cards.goalLabel(i), "Rarity" to t.name),
+                idLabel = "Get Shortstop", idValue = APP_LINK_SHORT, tier = i
+            )
+            box.addView(ReflectiveCard(this, fonts, data), lp(matchP, wrapC))
+        } else {
+            val w = dp(190)
+            box.addView(CardArtView(this, cardArt(i, 0L, w), true), lp(w, wrapC).apply { topMargin = dp(8); bottomMargin = dp(6) })
+        }
+        box.addView(tv(t.name, 24f, fonts.bold, brown, Gravity.CENTER).apply { setPadding(0, dp(8), 0, 0) }, lp(matchP, wrapC))
+        box.addView(tv("Rarity ${i + 1} of ${Cards.count}", 13f, fonts.regular, pal.muted, Gravity.CENTER).apply { setPadding(0, dp(2), 0, dp(12)) }, lp(matchP, wrapC))
+        box.addView(tv(Cards.requirement(i), 15f, fonts.medium, pal.ink, Gravity.CENTER), lp(matchP, wrapC))
+        if (at > 0L) {
+            box.addView(tv("Unlocked on " + SimpleDateFormat("EEEE d MMMM yyyy", Locale.getDefault()).format(java.util.Date(at)), 13f, fonts.semi, FocusTheme.orange, Gravity.CENTER)
+                .apply { setPadding(0, dp(12), 0, 0) }, lp(matchP, wrapC))
+        } else {
+            val (cur, target) = Cards.progress(this, i)
+            val isHours = Cards.rules[i].kind == Cards.Kind.HOURS
+            val label = if (isHours) "${fmtMin(cur)} of ${fmtMin(target)}" else "$cur of $target days"
+            box.addView(tv(label, 13f, fonts.semi, FocusTheme.orange, Gravity.CENTER).apply { setPadding(0, dp(14), 0, dp(8)) }, lp(matchP, wrapC))
+            val bar = OrangeBar(this, FocusTheme.cardEdge(dark))
+            box.addView(bar, lp(matchP, dp(8)).apply { marginStart = dp(24); marginEnd = dp(24) })
+            bar.post { bar.setProgress(cur.toFloat() / target, true) }
+        }
+        showSheet(t.name + " card", box)
     }
 
     // ----- screen time (needs Usage access) -----

@@ -677,6 +677,15 @@ class ReflectiveCard(ctx: Context, private val fonts: Fonts, private val data: F
         text(c, data.eyebrow, pad, bigBase - bs * 0.74f - 12f * u, 11f * u, fonts.semi, muted, Paint.Align.LEFT, 0.14f)
     }
 
+    /** The card flat, with a gentle fixed light, for the collection grid. */
+    fun renderFlat(wPx: Int): Bitmap {
+        val w = wPx.toFloat()
+        val h = w * ratio
+        val bmp = Bitmap.createBitmap(wPx, h.toInt(), Bitmap.Config.ARGB_8888)
+        drawCard(Canvas(bmp), w, h, 0.16f, -0.10f, 0.3f, -0.3f, -0.4f)
+        return bmp
+    }
+
     /** The picture people share: the card at a pleasing angle on a soft page, with the link under it. */
     fun snapshot(): Bitmap {
         val bw = 1080
