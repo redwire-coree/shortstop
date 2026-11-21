@@ -1780,7 +1780,6 @@ class MainActivity : Activity() {
         host.removeAllViews()
         val holder = FrameLayout(this)
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val blurView = UpwardBlurView(this).apply { visibility = View.GONE }
         val screenW = resources.displayMetrics.widthPixels
         // Dither Veil: burn through the 1-bit photo with a finger
         val veil = DitherVeil(this, pal.dark, pal.canvas)
@@ -1814,18 +1813,27 @@ class MainActivity : Activity() {
                     if (busy) return@setOnClickListener
                     busy = true
                     val bmp = Bitmap.createBitmap(content.width, content.height, Bitmap.Config.ARGB_8888)
-                    content.draw(Canvas(bmp))
+                    val cv = Canvas(bmp)
+                    cv.drawColor(pal.canvas)   // opaque, so the blur has no dark fringes
+                    content.draw(cv)
                     updateStatusBar(true)
-                    blurView.visibility = View.VISIBLE
+                    // the blur lives above the whole screen so it can fade out over the new schedule list
+                    val rootFrame = findViewById<ViewGroup>(android.R.id.content)
+                    val a = IntArray(2); val b = IntArray(2)
+                    content.getLocationInWindow(a); rootFrame.getLocationInWindow(b)
+                    val blur = UpwardBlurView(this@MainActivity)
+                    rootFrame.addView(blur, FrameLayout.LayoutParams(content.width, content.height).apply {
+                        leftMargin = a[0] - b[0]; topMargin = a[1] - b[1]
+                    })
                     content.visibility = View.INVISIBLE
-                    blurView.start(bmp) {
+                    blur.start(bmp, onMid = {
                         Store.saveSchedules(this@MainActivity, Store.schedules(this@MainActivity) +
                             Store.FocusSchedule(System.currentTimeMillis().toString() + i, n, st, en, 31, true))
                         fillSchedules()
                         refreshStatus()
                         toast("$n added")
-                        schedCol?.let { col -> for (k in 0 until col.childCount) popIn(col.getChildAt(k), 60L + k * 70L) }
-                    }
+                        schedCol?.let { col -> for (k in 0 until col.childCount) popIn(col.getChildAt(k), 40L + k * 70L) }
+                    }, onDone = { rootFrame.removeView(blur) })
                 }
                 press(this)
             }
@@ -1859,7 +1867,6 @@ class MainActivity : Activity() {
         content.addView(hs, lp(matchP, wrapC))
         content.addView(dots, lp(matchP, wrapC).apply { topMargin = dp(14) })
         holder.addView(content, FrameLayout.LayoutParams(matchP, wrapC))
-        holder.addView(blurView, FrameLayout.LayoutParams(matchP, matchP))
         host.addView(holder, FrameLayout.LayoutParams(matchP, wrapC))
     }
 
