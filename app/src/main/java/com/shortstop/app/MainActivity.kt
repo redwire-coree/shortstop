@@ -1128,7 +1128,7 @@ class MainActivity : Activity() {
         breakBtn.setPadding(dp(12), 0, dp(12), 0)
         breakBtn.setTextColor(if (pal.dark) 0xFFFFD9B8.toInt() else 0xFF8A3E10.toInt())
         breakBtn.background = round(FocusCardColors.peach(pal.dark), 40)
-        endBtn.tint(FocusTheme.cardFill(pal.dark), FocusTheme.cardEdge(pal.dark),
+        endBtn.tint(FocusCardColors.peach(pal.dark), FocusCardColors.peach(pal.dark),
             if (pal.dark) 0xFFFFD9B8.toInt() else 0xFF8A3E10.toInt(), FocusCardColors.ORANGE_B)
         btns.addView(breakBtn, lp(0, dp(50), 1f).apply { marginEnd = dp(8) })
         btns.addView(endBtn, lp(0, dp(50), 1f))
@@ -1148,16 +1148,13 @@ class MainActivity : Activity() {
         val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
         fun tile(label: String): Pair<View, TextView> {
             val t = card().apply {
-                setPadding(dp(8), dp(16), dp(8), dp(14)); gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(4), dp(16), dp(4), dp(14)); gravity = Gravity.CENTER_HORIZONTAL
                 background = round(FocusTheme.cardFill(pal.dark), 20, FocusTheme.cardEdge(pal.dark), dp(1))
             }
             val v = tv("", 20f, fonts.bold, FocusTheme.title(pal.dark), Gravity.CENTER).apply { letterSpacing = -0.02f; setSingleLine(); minHeight = dp(28) }
             t.addView(v, lp(matchP, wrapC))
             t.addView(View(this).apply { background = round(FocusCardColors.ORANGE, 4) }, lp(dp(16), dp(3)).apply { topMargin = dp(6); gravity = Gravity.CENTER_HORIZONTAL })
-            t.addView(tv(label, 11f, fonts.medium, pal.muted, Gravity.CENTER).apply {
-                setSingleLine(); setPadding(0, dp(7), 0, 0)
-                if (android.os.Build.VERSION.SDK_INT >= 26) setAutoSizeTextTypeUniformWithConfiguration(8, 11, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
-            }, lp(matchP, wrapC))
+            t.addView(tv(label, 10f, fonts.medium, pal.muted, Gravity.CENTER).apply { setSingleLine(); setPadding(0, dp(7), 0, 0) }, lp(matchP, wrapC))
             return t to v
         }
         val (t1, v1) = tile("Focus today"); val (t2, v2) = tile("Day streak"); val (t3, v3) = tile("Apps blocked")

@@ -566,7 +566,8 @@ class FuseButton(
             MeasureSpec.AT_MOST -> minOf(want, size)
             else -> want
         }
-        setMeasuredDimension(mw, context.dpf(46f).toInt())
+        val mh = if (MeasureSpec.getMode(h) == MeasureSpec.EXACTLY) MeasureSpec.getSize(h) else context.dpf(46f).toInt()
+        setMeasuredDimension(mw, mh)
     }
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
