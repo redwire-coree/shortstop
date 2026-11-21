@@ -77,6 +77,14 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
         (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).roundToInt())
     private fun lum(c: Int) = (0.2126f * Color.red(c) + 0.7152f * Color.green(c) + 0.0722f * Color.blue(c)) / 255f
 
+    override fun onMeasure(wSpec: Int, hSpec: Int) {
+        val w = MeasureSpec.getSize(wSpec)
+        val b = src
+        val h = if (b != null && w > 0) (w * b.height / b.width.toFloat() / 0.80f).toInt().coerceIn((200f * d).toInt(), (360f * d).toInt())
+        else (260f * d).toInt()
+        setMeasuredDimension(w, h)
+    }
+
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
         val bmp = src ?: return
@@ -84,7 +92,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
         // contain-fit rect
         // the photo lives in the upper 80%; the bottom 20% is the paper-to-page gradient
         val regionH = h * 0.80f
-        val s = min(w / bmp.width.toFloat(), regionH / bmp.height.toFloat()) * 0.94f
+        val s = min(w / bmp.width.toFloat(), regionH / bmp.height.toFloat())
         val iw = bmp.width * s; val ih = bmp.height * s
         dst.set((w - iw) / 2f, (regionH - ih) / 2f, (w + iw) / 2f, (regionH + ih) / 2f)
 

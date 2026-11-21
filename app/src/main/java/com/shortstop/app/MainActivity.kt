@@ -2006,7 +2006,7 @@ class MainActivity : Activity() {
         val screenW = resources.displayMetrics.widthPixels
         // Dither Veil: burn through the 1-bit photo with a finger
         val veil = DitherVeil(this, pal.dark, pal.canvas)
-        content.addView(veil, lp(matchP, dp(330)))
+        content.addView(veil, lp(matchP, wrapC))
         content.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(2), dp(8), dp(22))
