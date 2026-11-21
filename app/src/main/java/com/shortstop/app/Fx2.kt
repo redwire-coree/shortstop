@@ -547,12 +547,16 @@ class FuseButton(
     private val pt = FloatArray(2)
 
     /** Soft fill and edge colors, for screens with their own palette. */
-    fun tint(fill: Int, edge: Int) { bg.color = fill; ring.color = edge; invalidate() }
+    fun tint(fill: Int, edge: Int, ink: Int = pal.ink, fuse: Int = pal.ink) {
+        bg.color = fill; ring.color = edge; inkC = ink
+        fusePaint.color = fuse; tip.color = fuse; tick.color = fuse; invalidate()
+    }
+    private var inkC = pal.ink
 
     private fun shown(): String = when (state) { 1 -> undoLabel; 2 -> doneLabel; else -> text }
 
     override fun onMeasure(w: Int, h: Int) {
-        txt.textSize = context.dpf(14f)
+        txt.textSize = 14f * context.resources.displayMetrics.scaledDensity
         val widest = listOf(text, undoLabel, doneLabel).maxByOrNull { it.length } ?: text
         val want = (txt.measureText(widest) + context.dpf(56f)).toInt()
         val mode = MeasureSpec.getMode(w)
@@ -575,7 +579,7 @@ class FuseButton(
 
     private fun drawLabel(c: Canvas, s: String, a: Float, cx: Float, cy: Float, check: Boolean) {
         if (a <= 0.01f) return
-        txt.color = pal.ink
+        txt.color = inkC
         txt.alpha = (255 * a).toInt()
         if (check) {
             val tw = txt.measureText(s)
@@ -606,7 +610,7 @@ class FuseButton(
             tip.alpha = 255
             c.drawCircle(pt[0], pt[1], context.dpf(2.2f), tip)
         }
-        txt.textSize = context.dpf(14f)
+        txt.textSize = 14f * context.resources.displayMetrics.scaledDensity
         val cy = h / 2f - (txt.ascent() + txt.descent()) / 2f
         if (swap < 1f) {
             drawLabel(c, oldLabel, 1f - swap * 2f, w / 2f, cy, false)
