@@ -80,7 +80,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
     override fun onMeasure(wSpec: Int, hSpec: Int) {
         val w = MeasureSpec.getSize(wSpec)
         val b = src
-        val h = if (b != null && w > 0) (w * b.height / b.width.toFloat() / 0.80f).toInt().coerceIn((200f * d).toInt(), (360f * d).toInt())
+        val h = if (b != null && w > 0) (w * b.height / b.width.toFloat()).toInt().coerceIn((190f * d).toInt(), (300f * d).toInt())
         else (260f * d).toInt()
         setMeasuredDimension(w, h)
     }
@@ -91,7 +91,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
         if (w <= 0 || h <= 0) return
         // contain-fit rect
         // the photo lives in the upper 80%; the bottom 20% is the paper-to-page gradient
-        val regionH = h * 0.80f
+        val regionH = h.toFloat()
         val s = min(w / bmp.width.toFloat(), regionH / bmp.height.toFloat())
         val iw = bmp.width * s; val ih = bmp.height * s
         dst.set((w - iw) / 2f, (regionH - ih) / 2f, (w + iw) / 2f, (regionH + ih) / 2f)
@@ -261,7 +261,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
     private fun drawFade(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat()
         fadeP.shader = fBot
-        c.drawRect(0f, h * 0.80f - 1f, w, h, fadeP)
+        c.drawRect(0f, h * 0.94f, w, h, fadeP)
     }
 
     private fun blurred(src: Bitmap, f: Int): Bitmap {

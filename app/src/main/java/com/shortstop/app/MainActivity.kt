@@ -2007,9 +2007,9 @@ class MainActivity : Activity() {
         // Dither Veil: burn through the 1-bit photo with a finger
         val veil = DitherVeil(this, pal.dark, pal.canvas)
         content.addView(veil, lp(matchP, wrapC))
-        content.addView(display("Create your\nstudy schedule", 22f).apply {
+        content.addView(display("Create your\nstudy schedule", 21f).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(8), dp(2), dp(8), dp(22))
+            setPadding(dp(8), dp(12), dp(8), dp(18))
         }, lp(matchP, wrapC))
         val templates = listOf(
             Triple("Morning Study", 6 * 60, 8 * 60),
@@ -2017,8 +2017,8 @@ class MainActivity : Activity() {
             Triple("Evening Study", 18 * 60, 20 * 60),
             Triple("Night Study", 20 * 60, 22 * 60)
         )
-        val cardW = screenW - dp(76)
-        val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(14), 0, dp(14), 0) }
+        val cardW = screenW - dp(48)
+        val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(4), 0, dp(4), 0) }
         templates.forEachIndexed { i, (n, st, en) ->
             val c = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -2061,7 +2061,7 @@ class MainActivity : Activity() {
                 press(this)
             }
             c.addView(add, lp(dp(34), dp(34)))
-            strip.addView(c, lp(cardW, wrapC).apply { marginStart = dp(6); marginEnd = dp(6) })
+            strip.addView(c, lp(cardW, wrapC).apply { marginStart = dp(4); marginEnd = dp(4) })
         }
         val hs = android.widget.HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
