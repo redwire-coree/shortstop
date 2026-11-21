@@ -88,7 +88,7 @@ class RollPainter(private val host: View) {
             total += widths[i]
         }
         val now = SystemClock.uptimeMillis()
-        val travel = paint.textSize * 0.55f
+        val travel = paint.textSize * 0.34f
         val baseAlpha = paint.alpha
         var x = cx - total / 2f
         var still = true
@@ -104,10 +104,10 @@ class RollPainter(private val host: View) {
                 val e = easeOutBack(t)
                 val o = t * t
                 if (p != null) {
-                    paint.alpha = (baseAlpha * (1f - o)).toInt()
+                    paint.alpha = (baseAlpha * 0.24f * (1f - o)).toInt()
                     c.drawText(p.toString(), mid, baseline - o * travel, paint)
                 }
-                paint.alpha = (baseAlpha * t.coerceIn(0f, 1f)).toInt()
+                paint.alpha = (baseAlpha * (0.18f + 0.82f * t.coerceIn(0f, 1f))).toInt()
                 c.drawText(q.toString(), mid, baseline + (1f - e) * travel, paint)
                 paint.alpha = baseAlpha
             } else {

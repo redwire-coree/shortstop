@@ -71,7 +71,8 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
     }
 
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = pal.track
+        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND
+        color = if (pal.dark) FocusTheme.track(true) else FocusTheme.track(false)
     }
     private val arc = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = pal.ink
@@ -79,7 +80,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
     private val dot = Paint(Paint.ANTI_ALIAS_FLAG)
     private val head = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink }
     private val halo = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.surface }
+    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (pal.dark) 0xFF5A3A25.toInt() else 0xFFFFE5CD.toInt() }
     private val bigP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#1A1410"); typeface = fonts.bold; textAlign = Paint.Align.CENTER; letterSpacing = -0.02f
     }
@@ -148,7 +149,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         c.drawCircle(cx, cy, faceR - 0.5f * d, faceEdge)
 
         track.strokeWidth = sw
-        track.color = if (emberArc) FocusCardColors.peach(pal.dark) else pal.track
+        track.color = if (emberArc) FocusTheme.track(pal.dark) else pal.track
         track.alpha = if (emberArc) 255 else 120
         val arcBase = if (emberArc) FocusCardColors.ORANGE_B else pal.ink
         head.color = arcBase
@@ -159,7 +160,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         arc.strokeWidth = sw
         if (frac > 0.0005f) {
             val ink = arcBase
-            val tail = Color.argb(if (calm) 30 else 46, Color.red(ink), Color.green(ink), Color.blue(ink))
+            val tail = Color.argb(if (calm) 36 else 58, Color.red(ink), Color.green(ink), Color.blue(ink))
             val headC = Color.argb(if (calm) 110 else 255, Color.red(ink), Color.green(ink), Color.blue(ink))
             val sg = SweepGradient(cx, cy, intArrayOf(tail, headC), floatArrayOf(0f, maxOf(frac, 0.01f)))
             sweepM.setRotate(-90f, cx, cy)
@@ -216,7 +217,7 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         // digits, sized to sit inside the dots
         // one size for the whole session: fitted against the widest digits of the same length, so nothing
         // changes size as the numbers tick and nothing can leave the circle
-        var ts = size * (if (goalMode) 0.2f else 0.215f)
+        var ts = size * (if (goalMode) 0.2f else 0.205f)
         val inner = (if (goalMode) faceR * 2f * 0.8f else dr * 2f - 28f * d)
         val template = big.map { if (it.isDigit()) '8' else it }.joinToString("")
         bigP.textSize = ts

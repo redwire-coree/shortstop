@@ -19,9 +19,9 @@ class DayBar(ctx: Context, private val pal: Palette, private val fonts: Fonts, p
     private var on = true
     private var onT = 1f
     private var anim: ValueAnimator? = null
-    private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = mixColor(pal.surface, pal.ink, if (pal.dark) 0.14f else 0.09f) }
+    private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FocusTheme.track(pal.dark) }
     private val bar = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.muted; textSize = 10.5f * sd; typeface = fonts.medium; textAlign = Paint.Align.CENTER }
+    private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FocusTheme.muted(pal.dark); textSize = 10.5f * sd; typeface = fonts.medium; textAlign = Paint.Align.CENTER }
     private val rect = RectF()
     private val barH get() = 10f * d
 
@@ -54,7 +54,7 @@ class DayBar(ctx: Context, private val pal: Palette, private val fonts: Fonts, p
         val bh = barH
         rect.set(0f, 0f, w, bh)
         c.drawRoundRect(rect, bh / 2f, bh / 2f, track)
-        bar.color = mixColor(mixColor(pal.border, pal.muted, 0.6f), pal.ink, onT)
+        bar.color = mixColor(FocusTheme.cardEdge(pal.dark), FocusCardColors.ORANGE, onT)
         fun seg(a: Float, b: Float) {
             if (b <= a) return
             rect.set(w * a / 1440f, 0f, w * b / 1440f, bh)
@@ -82,14 +82,14 @@ class WeekTimeline(
     private var reveal = 0f
     private val rowH get() = 24f * d
     private val left get() = 26f * d
-    private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = mixColor(pal.surface, pal.ink, if (pal.dark) 0.12f else 0.07f) }
-    private val guide = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.border; strokeWidth = d }
+    private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FocusTheme.track(pal.dark) }
+    private val guide = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FocusTheme.cardEdge(pal.dark); strokeWidth = d }
     private val bar = Paint(Paint.ANTI_ALIAS_FLAG)
     private val day = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f * sd; textAlign = Paint.Align.CENTER }
-    private val axis = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.muted; textSize = 10.5f * sd; typeface = fonts.medium }
+    private val axis = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FocusTheme.muted(pal.dark); textSize = 10.5f * sd; typeface = fonts.medium }
     private val halo = Paint(Paint.ANTI_ALIAS_FLAG)
     private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.canvas }
-    private val dotIn = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink }
+    private val dotIn = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FocusCardColors.ORANGE }
     private val rect = RectF()
 
     override fun onAttachedToWindow() {
@@ -117,7 +117,7 @@ class WeekTimeline(
         for (r in 0 until 7) {
             val cy = r * rowH + rowH / 2f
             day.typeface = if (r == today) fonts.bold else fonts.medium
-            day.color = if (r == today) pal.ink else pal.muted
+            day.color = if (r == today) FocusTheme.title(pal.dark) else FocusTheme.muted(pal.dark)
             c.drawText(letters[r].toString(), left / 2f - 2f * d, cy - (day.ascent() + day.descent()) / 2f, day)
             rect.set(left, cy - bh / 2f, w, cy + bh / 2f)
             c.drawRoundRect(rect, bh / 2f, bh / 2f, track)
@@ -132,7 +132,7 @@ class WeekTimeline(
             val grow = ((reveal * 1.35f - row * 0.05f)).coerceIn(0f, 1f)
             val x0 = left + tw * a / 1440f
             val x1 = x0 + (tw * b / 1440f - x0) * grow
-            bar.color = if (s.on) pal.ink else mixColor(pal.border, pal.muted, 0.6f)
+            bar.color = if (s.on) FocusCardColors.ORANGE else mixColor(pal.border, pal.muted, 0.35f)
             rect.set(x0, cy - bh / 2f, x1, cy + bh / 2f)
             c.drawRoundRect(rect, bh / 2f, bh / 2f, bar)
         }

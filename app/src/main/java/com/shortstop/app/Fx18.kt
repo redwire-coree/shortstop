@@ -48,8 +48,8 @@ class FocusTimeline(
 ) : View(ctx) {
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FocusCardColors.peach(pal.dark) }
     private val pill = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val now = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.ink; alpha = 150; strokeCap = Paint.Cap.ROUND }
-    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.muted; typeface = fonts.medium }
+    private val now = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FocusCardColors.ORANGE_B; alpha = 220; strokeCap = Paint.Cap.ROUND }
+    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FocusTheme.muted(pal.dark); typeface = fonts.medium }
     private val rect = RectF()
     private val dayStart = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)

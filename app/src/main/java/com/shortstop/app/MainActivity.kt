@@ -692,7 +692,7 @@ class MainActivity : Activity() {
         val paperOn = !forceCanvas && !pal.dark && tab == 1 && Store.schedules(this).isEmpty()
         val to = when {
             paperOn -> Color.parseColor("#F4F1EA")
-            !forceCanvas && tab == 0 -> FocusTheme.bg(pal.dark)
+            !forceCanvas && (tab == 0 || tab == 1) -> FocusTheme.bg(pal.dark)
             else -> pal.canvas
         }
         if (statusNow == 0) statusNow = window.statusBarColor
@@ -1089,20 +1089,21 @@ class MainActivity : Activity() {
         val run = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(20), dp(28), dp(20), dp(24))
+            setPadding(dp(18), dp(22), dp(18), dp(20))
         }
         val stat = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            background = round(FocusCardColors.peachSoft(pal.dark), 40)
-            setPadding(dp(12), dp(7), dp(14), dp(7))
+            background = round(FocusTheme.accentSoft(pal.dark), 40, FocusTheme.cardEdge(pal.dark), dp(1))
+            setPadding(dp(12), dp(8), dp(14), dp(8))
+            elevation = dp(1).toFloat()
         }
         val lat = LatticeLoader(this, FocusCardColors.ORANGE)
         runLattice = lat
         stat.addView(lat, lp(wrapC, wrapC).apply { marginEnd = dp(10) })
-        val rl = tv("Focusing", 13f, fonts.semi, pal.ink)
+        val rl = tv("Focusing", 13f, fonts.semi, FocusTheme.title(pal.dark))
         runLabel = rl
         stat.addView(rl, lp(wrapC, wrapC))
-        val re = tv("", 13f, fonts.regular, pal.muted)
+        val re = tv("", 13f, fonts.medium, FocusTheme.muted(pal.dark))
         runElapsed = re
         stat.addView(re, lp(wrapC, wrapC).apply { marginStart = dp(8) })
         run.addView(stat, lp(wrapC, wrapC).apply { bottomMargin = dp(18) })
@@ -1110,7 +1111,7 @@ class MainActivity : Activity() {
         runRing = ring
         ring.emberArc = true
         run.addView(ring, lp(wrapC, wrapC))
-        val info = tv("", 14f, fonts.regular, pal.muted, Gravity.CENTER).apply { setPadding(0, dp(18), 0, dp(16)) }
+        val info = tv("", 14f, fonts.medium, FocusTheme.muted(pal.dark), Gravity.CENTER).apply { setPadding(0, dp(16), 0, dp(14)) }
         runInfo = info
         run.addView(info, lp(matchP, wrapC))
         val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -1126,16 +1127,17 @@ class MainActivity : Activity() {
         runEndBtn = endBtn
         breakBtn.setSingleLine(true)
         breakBtn.setPadding(dp(12), 0, dp(12), 0)
-        breakBtn.setTextColor(if (pal.dark) 0xFFFFD9B8.toInt() else 0xFF8A3E10.toInt())
-        breakBtn.background = round(FocusCardColors.peach(pal.dark), 40)
+        breakBtn.setTextColor(if (pal.dark) 0xFFFFE6CC.toInt() else 0xFF8A431B.toInt())
+        breakBtn.background = round(FocusTheme.accentSoft(pal.dark), 40, FocusTheme.cardEdge(pal.dark), dp(1))
         endBtn.tint(FocusCardColors.peach(pal.dark), FocusCardColors.peach(pal.dark),
             if (pal.dark) 0xFFFFD9B8.toInt() else 0xFF8A3E10.toInt(), FocusCardColors.ORANGE_B)
         btns.addView(breakBtn, lp(0, dp(50), 1f).apply { marginEnd = dp(8) })
         btns.addView(endBtn, lp(0, dp(50), 1f))
         run.addView(btns, lp(matchP, wrapC))
         val runWrap = FrameLayout(this).apply {
-            background = round(FocusTheme.cardFill(pal.dark), 24, FocusTheme.cardEdge(pal.dark), dp(1))
+            background = round(FocusTheme.cardFill(pal.dark), 28, FocusTheme.cardEdge(pal.dark), dp(1))
             clipToOutline = true
+            elevation = dp(2).toFloat()
             visibility = View.GONE
         }
         runWrap.addView(SoftClouds(this, pal.dark), FrameLayout.LayoutParams(matchP, matchP))
@@ -1148,13 +1150,18 @@ class MainActivity : Activity() {
         val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
         fun tile(label: String): Pair<View, TextView> {
             val t = card().apply {
-                setPadding(dp(4), dp(16), dp(4), dp(14)); gravity = Gravity.CENTER_HORIZONTAL
-                background = round(FocusTheme.cardFill(pal.dark), 20, FocusTheme.cardEdge(pal.dark), dp(1))
+                setPadding(dp(5), dp(14), dp(5), dp(13)); gravity = Gravity.CENTER_HORIZONTAL
+                background = round(FocusTheme.cardFill(pal.dark), 22, FocusTheme.cardEdge(pal.dark), dp(1))
+                elevation = dp(1).toFloat()
             }
-            val v = tv("", 20f, fonts.bold, FocusTheme.title(pal.dark), Gravity.CENTER).apply { letterSpacing = -0.02f; setSingleLine(); minHeight = dp(28) }
+            val v = tv("", 20f, fonts.bold, FocusTheme.title(pal.dark), Gravity.CENTER).apply {
+                letterSpacing = -0.025f; setSingleLine(); minHeight = dp(28); includeFontPadding = false
+            }
             t.addView(v, lp(matchP, wrapC))
-            t.addView(View(this).apply { background = round(FocusCardColors.ORANGE, 4) }, lp(dp(16), dp(3)).apply { topMargin = dp(6); gravity = Gravity.CENTER_HORIZONTAL })
-            t.addView(tv(label, 10f, fonts.medium, pal.muted, Gravity.CENTER).apply { setSingleLine(); setPadding(0, dp(7), 0, 0) }, lp(matchP, wrapC))
+            t.addView(View(this).apply { background = round(FocusCardColors.ORANGE, 4) }, lp(dp(18), dp(3)).apply { topMargin = dp(7); gravity = Gravity.CENTER_HORIZONTAL })
+            t.addView(tv(label, 11f, fonts.medium, FocusTheme.muted(pal.dark), Gravity.CENTER).apply {
+                maxLines = 2; setPadding(0, dp(7), 0, 0)
+            }, lp(matchP, wrapC))
             return t to v
         }
         val (t1, v1) = tile("Focus today"); val (t2, v2) = tile("Day streak"); val (t3, v3) = tile("Apps blocked")
@@ -1164,18 +1171,19 @@ class MainActivity : Activity() {
         tiles.addView(t3, lp(0, matchP, 1f))
         extras.addView(tiles, lp(matchP, wrapC).apply { topMargin = dp(14) })
         val blocking = card().apply {
-            setPadding(dp(20), dp(16), dp(20), dp(8))
+            setPadding(dp(18), dp(16), dp(18), dp(8))
             background = round(FocusTheme.cardFill(pal.dark), 24, FocusTheme.cardEdge(pal.dark), dp(1))
+            elevation = dp(1).toFloat()
         }
         val bh = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(6)) }
         bh.addView(View(this).apply { background = round(FocusCardColors.ORANGE, 8) }, lp(dp(8), dp(8)).apply { marginEnd = dp(10) })
-        bh.addView(tv("Blocking now", 15f, fonts.semi, pal.ink))
+        bh.addView(tv("Blocking now", 15f, fonts.semi, FocusTheme.title(pal.dark)))
         blocking.addView(bh, lp(matchP, wrapC))
         fun kv(label: String): TextView {
             if (blocking.childCount > 1) blocking.addView(View(this).apply { setBackgroundColor(FocusTheme.cardEdge(pal.dark)) }, lp(matchP, dp(1)))
             val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(11), 0, dp(11)) }
-            r.addView(tv(label, 14f, fonts.regular, pal.muted), lp(0, wrapC, 1f))
-            val v = tv("", 14f, fonts.semi, pal.ink)
+            r.addView(tv(label, 13f, fonts.regular, FocusTheme.muted(pal.dark)), lp(0, wrapC, 1f))
+            val v = tv("", 13f, fonts.semi, FocusTheme.title(pal.dark))
             r.addView(v, lp(wrapC, wrapC))
             blocking.addView(r, lp(matchP, wrapC))
             return v
@@ -1184,9 +1192,12 @@ class MainActivity : Activity() {
         extras.addView(blocking, lp(matchP, wrapC).apply { topMargin = dp(12) })
         val remind = Store.message(this)
         if (remind.isNotBlank()) {
-            val rc = card().apply { setPadding(dp(20), dp(18), dp(20), dp(18)) }
-            rc.addView(tv("YOUR REMINDER", 11f, fonts.semi, pal.muted).apply { letterSpacing = 0.14f }, lp(matchP, wrapC))
-            rc.addView(tv(remind, 16f, fonts.medium, pal.ink).apply { setPadding(0, dp(8), 0, 0) }, lp(matchP, wrapC))
+            val rc = card().apply {
+                setPadding(dp(20), dp(18), dp(20), dp(18))
+                background = round(FocusTheme.cardFill(pal.dark), 24, FocusTheme.cardEdge(pal.dark), dp(1))
+            }
+            rc.addView(tv("YOUR REMINDER", 11f, fonts.semi, FocusTheme.muted(pal.dark)).apply { letterSpacing = 0.14f }, lp(matchP, wrapC))
+            rc.addView(tv(remind, 16f, fonts.medium, FocusTheme.title(pal.dark)).apply { setPadding(0, dp(8), 0, 0) }, lp(matchP, wrapC))
             extras.addView(rc, lp(matchP, wrapC).apply { topMargin = dp(12) })
         }
         runExtras = extras
@@ -1808,25 +1819,27 @@ class MainActivity : Activity() {
     private fun schedulePage(): View {
         val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val col = column().apply { clipToPadding = false }
-        val sTitle = display("Schedule", 30f)
+        val sTitle = display("Schedule", 30f).apply { setTextColor(FocusTheme.title(pal.dark)) }
         schedPageTitle = sTitle
         col.addView(sTitle)
         val intro = tv("Focus starts by itself in these windows. Your focus apps are closed until they end.",
-            14f, fonts.regular, pal.muted).apply { setPadding(0, dp(8), 0, dp(6)) }
+            14f, fonts.regular, FocusTheme.muted(pal.dark)).apply { setPadding(0, dp(8), 0, dp(6)) }
         schedIntro = intro
         col.addView(intro)
 
         val head = card().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(16), dp(20), dp(16))
+            setPadding(dp(18), dp(16), dp(18), dp(16))
+            background = round(FocusTheme.cardFill(pal.dark), 24, FocusTheme.cardEdge(pal.dark), dp(1))
+            elevation = dp(1).toFloat()
         }
-        val dot = LiveDot(this, pal.ink)
+        val dot = LiveDot(this, FocusCardColors.ORANGE)
         schedDot = dot
         head.addView(dot, lp(wrapC, wrapC).apply { marginEnd = dp(8) })
         val hc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        schedTitle = tv("", 16f, fonts.semi, pal.ink)
-        schedSub = tv("", 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(4), 0, 0) }
+        schedTitle = tv("", 16f, fonts.semi, FocusTheme.title(pal.dark))
+        schedSub = tv("", 13f, fonts.regular, FocusTheme.muted(pal.dark)).apply { setPadding(0, dp(4), 0, 0) }
         hc.addView(schedTitle, lp(matchP, wrapC))
         hc.addView(schedSub, lp(matchP, wrapC))
         head.addView(hc, lp(0, wrapC, 1f))
@@ -1845,11 +1858,17 @@ class MainActivity : Activity() {
         val barWrap = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(dp(20), dp(10), dp(20), dp(14)) }
         barWrap.addView(pill("Create schedule", true) { showScheduleSheet(null) }.apply {
             textSize = 15f
+            setTextColor(Color.WHITE)
+            background = round(FocusCardColors.ORANGE, 40)
+            elevation = dp(2).toFloat()
             setPadding(dp(40), dp(15), dp(40), dp(15))
         }, lp(wrapC, wrapC))
         page.addView(barWrap, lp(matchP, wrapC))
         fillSchedules()
-        return page
+        val root = FrameLayout(this)
+        root.addView(AmbientBackdrop(this, pal), FrameLayout.LayoutParams(matchP, matchP))
+        root.addView(page, FrameLayout.LayoutParams(matchP, matchP))
+        return root
     }
 
     /** The next window that will start, as (schedule, minutes from now). */
@@ -1921,13 +1940,31 @@ class MainActivity : Activity() {
         if (items.isEmpty()) { schedEmptyHost?.let { fillScheduleEmpty(it) }; return }
 
         val activeId = Store.scheduleActive(this)?.id
+
+        // Compact weekly overview: existing schedules, plotted on the real seven-day timeline.
+        val weekCard = card().apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(12))
+            background = round(FocusTheme.cardFill(pal.dark), 24, FocusTheme.cardEdge(pal.dark), dp(1))
+            elevation = dp(1).toFloat()
+        }
+        weekCard.addView(tv("This week", 14f, fonts.semi, FocusTheme.title(pal.dark)).apply {
+            setPadding(0, 0, 0, dp(8))
+        })
+        val week = WeekTimeline(this, pal, fonts, items)
+        schedTimeline = week
+        weekCard.addView(week, lp(matchP, wrapC))
+        list.addView(weekCard, lp(matchP, wrapC).apply { bottomMargin = dp(12) })
+
         for (s in items) {
             val live = s.id == activeId
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = round(pal.surface, 24, if (live) pal.ink else pal.border, dp(1))
-                setPadding(dp(20), dp(16), dp(16), dp(16))
+                background = round(FocusTheme.cardFill(pal.dark), 24,
+                    if (live) FocusCardColors.ORANGE else FocusTheme.cardEdge(pal.dark), dp(if (live) 2 else 1))
+                setPadding(dp(18), dp(16), dp(16), dp(16))
+                elevation = if (live) dp(2).toFloat() else dp(1).toFloat()
                 isClickable = true
                 alpha = if (s.on) 1f else 0.62f
                 setOnClickListener { showScheduleSheet(s) }
@@ -1935,17 +1972,18 @@ class MainActivity : Activity() {
             }
             val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             val nameRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            nameRow.addView(tv(s.name, 17f, fonts.semi, pal.ink))
-            if (live) nameRow.addView(tv("LIVE", 10f, fonts.bold, pal.canvas, Gravity.CENTER).apply {
+            nameRow.addView(tv(s.name, 16f, fonts.semi, FocusTheme.title(pal.dark)))
+            if (live) nameRow.addView(tv("LIVE", 10f, fonts.bold, Color.WHITE, Gravity.CENTER).apply {
                 letterSpacing = 0.1f
-                background = round(pal.ink, 40)
+                background = round(FocusCardColors.ORANGE, 40)
                 setPadding(dp(8), dp(4), dp(8), dp(4))
             }, lp(wrapC, wrapC).apply { marginStart = dp(8) })
             left.addView(nameRow)
-            left.addView(tv("${fmt12(s.start)} – ${fmt12(s.end)}", 14f, fonts.regular, pal.ink).apply { setPadding(0, dp(4), 0, 0) })
-            left.addView(tv(daysLabel(s.days), 13f, fonts.regular, pal.muted).apply { setPadding(0, dp(2), 0, 0) })
+            left.addView(tv("${fmt12(s.start)} – ${fmt12(s.end)}", 14f, fonts.medium, FocusTheme.accent(pal.dark)).apply { setPadding(0, dp(5), 0, 0) })
+            left.addView(tv(daysLabel(s.days), 12f, fonts.regular, FocusTheme.muted(pal.dark)).apply { setPadding(0, dp(3), 0, 0) })
             row.addView(left, lp(0, wrapC, 1f).apply { marginEnd = dp(12) })
             val t = ToggleView(this)
+            t.brand = true
             t.setOn(s.on, false)
             t.listener = { on ->
                 Store.saveSchedules(this, Store.schedules(this).map { if (it.id == s.id) it.copy(on = on) else it })
@@ -1983,12 +2021,12 @@ class MainActivity : Activity() {
             val c = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = round(pal.surface, 22, pal.border, dp(1))
+                background = round(FocusTheme.cardFill(pal.dark), 22, FocusTheme.cardEdge(pal.dark), dp(1))
                 setPadding(dp(18), dp(14), dp(14), dp(14))
             }
             val lc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            lc.addView(tv(n, 15f, fonts.semi, pal.ink))
-            lc.addView(tv("${fmt12(st)} – ${fmt12(en)}  ·  ${daysLabel(31)}", 12f, fonts.regular, pal.muted).apply { setPadding(0, dp(3), 0, 0) })
+            lc.addView(tv(n, 15f, fonts.semi, FocusTheme.title(pal.dark)))
+            lc.addView(tv("${fmt12(st)} – ${fmt12(en)}  ·  ${daysLabel(31)}", 12f, fonts.regular, FocusTheme.muted(pal.dark)).apply { setPadding(0, dp(3), 0, 0) })
             c.addView(lc, lp(0, wrapC, 1f).apply { marginEnd = dp(10) })
             var busy = false
             val add = GlyphBtn(this, true, pal.ink, pal.canvas, 0, true).apply {
@@ -2084,7 +2122,8 @@ class MainActivity : Activity() {
         fun paintTiles() {
             listOf(startTile, endTile).forEachIndexed { i, t ->
                 val on = editing == i
-                t.background = round(if (on) pal.canvas else pal.surface, 18, if (on) pal.ink else pal.border, dp(if (on) 2 else 1))
+                t.background = round(if (on) FocusTheme.accentSoft(pal.dark) else FocusTheme.cardFill(pal.dark),
+                    18, if (on) FocusCardColors.ORANGE else FocusTheme.cardEdge(pal.dark), dp(if (on) 2 else 1))
             }
         }
         wheel = TimeWheel(this, pal, fonts, start) { m ->
@@ -2133,7 +2172,7 @@ class MainActivity : Activity() {
         tiles.addView(endTile, lp(0, wrapC, 1f))
         box.addView(tiles)
         val wheelBox = LinearLayout(this).apply {
-            background = round(pal.surface, 22, pal.border, dp(1))
+            background = round(FocusTheme.cardFill(pal.dark), 22, FocusTheme.cardEdge(pal.dark), dp(1))
             setPadding(dp(8), dp(4), dp(8), dp(4))
         }
         wheelBox.addView(wheel, lp(matchP, wrapC))
@@ -2175,6 +2214,10 @@ class MainActivity : Activity() {
             closeSheet()
             fillSchedules()
             refreshStatus()
+        }.apply {
+            setTextColor(Color.WHITE)
+            background = round(FocusCardColors.ORANGE, 40)
+            elevation = dp(2).toFloat()
         }, lp(matchP, wrapC).apply { topMargin = dp(18) })
         if (existing != null) {
             box.addView(pill("Delete schedule", false) {

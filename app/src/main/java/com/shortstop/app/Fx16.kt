@@ -16,6 +16,10 @@ object FocusTheme {
     fun title(dark: Boolean): Int = Color.parseColor(if (dark) "#FFEFD9" else "#4A2A12")
     fun cardFill(dark: Boolean): Int = Color.parseColor(if (dark) "#3A2517" else "#FFFBF6")
     fun cardEdge(dark: Boolean): Int = Color.parseColor(if (dark) "#4D3322" else "#F6E2C8")
+    fun muted(dark: Boolean): Int = Color.parseColor(if (dark) "#D0BBA7" else "#8A725F")
+    fun accent(dark: Boolean): Int = Color.parseColor(if (dark) "#FFAD61" else "#E97825")
+    fun accentSoft(dark: Boolean): Int = Color.parseColor(if (dark) "#55351F" else "#FFF0E0")
+    fun track(dark: Boolean): Int = Color.parseColor(if (dark) "#60432E" else "#F5DFC7")
     val orange: Int = Color.parseColor("#FF9A3D")
 
     fun reducedMotion(c: Context): Boolean =
