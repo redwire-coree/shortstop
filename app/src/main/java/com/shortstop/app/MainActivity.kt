@@ -1864,7 +1864,7 @@ class MainActivity : Activity() {
                     content.draw(cv)
                     updateStatusBar(true)
                     // the blur lives above the whole screen so it can fade out over the new schedule list
-                    val rootFrame = findViewById<ViewGroup>(android.R.id.content)
+                    val rootFrame = window.decorView as ViewGroup
                     val a = IntArray(2); val b = IntArray(2)
                     content.getLocationInWindow(a); rootFrame.getLocationInWindow(b)
                     val blur = UpwardBlurView(this@MainActivity)
