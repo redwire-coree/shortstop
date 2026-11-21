@@ -988,13 +988,12 @@ class MainActivity : Activity() {
         val col = column()
 
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        // Focus heading only: friendly, softly rounded bold letters in warm brown (cream in dark mode)
-        top.addView(display("Focus", 34f).apply {
+        // Focus heading only: Bitsand, loaded from assets here and nowhere else (falls back to Inter Bold if missing)
+        val bitsand = try { Typeface.createFromAsset(assets, "fonts/Bitsand-DEMO.ttf") } catch (e: Exception) { fonts.bold }
+        top.addView(display("Focus", 36f).apply {
             setTextColor(FocusTheme.title(pal.dark))
-            paint.style = Paint.Style.FILL_AND_STROKE
-            paint.strokeJoin = Paint.Join.ROUND
-            paint.strokeWidth = dp(1).toFloat() * 0.9f
-            letterSpacing = -0.01f
+            typeface = bitsand
+            letterSpacing = 0f
         }, lp(0, wrapC, 1f))
         val chip = CallChip(this, pal, fonts)
         statusChip = chip
