@@ -231,6 +231,13 @@ class MainActivity : Activity() {
         loadApps()
         showLastCrash()
         if (!Store.prefs(this).getBoolean("tour_done", false)) window.decorView.postDelayed({ showTour() }, 1400L)
+        else window.decorView.postDelayed({
+            val p = Store.prefs(this)
+            if (!Store.focusRunning(this) && tourView == null && System.currentTimeMillis() - p.getLong("greet_at", 0L) > 6 * 3600_000L) {
+                p.edit().putLong("greet_at", System.currentTimeMillis()).apply()
+                orangeSay(Move.ENTER, "Hi, welcome back!", false, 1700L)
+            }
+        }, 1500L)
     }
 
     // ---------- crash notes: the reason is saved, then shown once on the next start so it can be fixed ----------
@@ -263,12 +270,13 @@ class MainActivity : Activity() {
     private fun orangeSay(move: Move, line: String, top: Boolean, ms: Long) {
         val root = window.decorView as ViewGroup
         val v = OrangeView(this, fonts, pal.dark, 84f)
+        v.interactive = false
         root.addView(v, FrameLayout.LayoutParams(wrapC, wrapC, (if (top) Gravity.TOP else Gravity.BOTTOM) or Gravity.CENTER_HORIZONTAL).apply {
             if (top) topMargin = dp(64) else bottomMargin = dp(110)
         })
-        v.postDelayed({ v.say(line); v.play(move) }, 450L)
-        v.postDelayed({ v.say(null); v.play(Move.EXIT) }, ms)
-        v.postDelayed({ root.removeView(v) }, ms + 500L)
+        v.postDelayed({ v.say(line); if (move != Move.ENTER) v.play(move, 1f, true) }, if (move == Move.ENTER) 500L else 900L)
+        v.postDelayed({ v.say(null); v.play(Move.EXIT) }, ms + 900L)
+        v.postDelayed({ root.removeView(v) }, ms + 1500L)
     }
 
     private fun maybeNudge() {
@@ -334,7 +342,7 @@ class MainActivity : Activity() {
             tourView = null
             box.animate().alpha(0f).setDuration(220).withEndAction { root.removeView(box) }.start()
             if (tab != 0) selectTab(0)
-            if (done) orangeSay(Move.CHEER, "You're all set!", true, 2200L)
+            if (done) orangeSay(Move.CHEER, "You're all set!", true, 1700L)
         }
         fun showStep(i: Int) {
             val (line, tabTo, spot) = steps[i]
@@ -1375,6 +1383,7 @@ class MainActivity : Activity() {
             Store.endBreak(this)
         } else if (Store.startBreak(this)) {
             toast("Break started. Blocks return when it ends.")
+            orangeSay(Move.BREAK, "Breathe. Back soon.", true, 1300L)
         }
         updateRunning()
     }
@@ -1454,7 +1463,11 @@ class MainActivity : Activity() {
     private fun onSessionDone() {
         fillFocusStats()
         val last = Store.sessions(this).lastOrNull() ?: return
-        orangeSay(if (last.done) Move.CHEER else Move.OOPS, if (last.done) "Nice focus!" else "Next one counts.", true, 2600L)
+        val goalNow = Store.goalMin(this)
+        val todayNow = Store.focusMinutesAgo(this, 0)
+        val goalHit = last.done && goalNow > 0 && todayNow >= goalNow && todayNow - last.minutes < goalNow
+        orangeSay(if (last.done) Move.CHEER else Move.OOPS,
+            if (goalHit) "Daily goal done!" else if (last.done) "Nice focus!" else "Next one counts.", true, 1700L)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(4)) }
         val tag = last.tag.ifEmpty { "Focus" }
         val streak = Store.streak(this)
@@ -1869,6 +1882,7 @@ class MainActivity : Activity() {
             closeSheet()
             wasRunning = true
             updateRunning()
+            orangeSay(Move.FOCUS, "Let's focus.", true, 1300L)
         }
         tint()
         box.addView(slide, lp(matchP, wrapC).apply { topMargin = dp(16); bottomMargin = dp(4); gravity = Gravity.CENTER_HORIZONTAL })
