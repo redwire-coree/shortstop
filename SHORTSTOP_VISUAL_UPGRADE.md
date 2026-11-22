@@ -1,14 +1,24 @@
-# Shortstop — Schedule screen refinement
+# Shortstop visual upgrade
 
-## Updated in this pass
-- Removed the artificial 20% empty matte band beneath the Schedule portrait by fitting the portrait into the full DitherVeil canvas.
-- Reduced the DitherVeil height cap from 360dp to 300dp so the portrait has a more balanced footprint on phone screens.
-- Kept only a subtle bottom fade rather than fading a large lower section into blank paper.
-- Tightened the Schedule empty-state title spacing and slightly reduced its size.
-- Widened the schedule-template cards and reduced side insets so the first card is easier to read.
+## What changed
+- Replaced the stark black/white global palette with warm paper, espresso text, soft borders, and a restrained citrus-orange action color.
+- Updated the dark palette to use deep espresso surfaces and warm cream text.
+- Segmented controls and primary pills now use the Shortstop orange accent.
+- App rows in Blocks now have a subtle warm selected treatment when an app is included in the current blocking mode.
+- Refined the Schedule empty-state portrait duotone to use espresso and muted orange tones against the warm page matte, with slightly softer contrast.
+- Matched the Schedule empty-state status bar to the warm page canvas.
+- Updated the README theme description.
 
 ## Preserved
-All schedule creation, templates, schedule storage, navigation, blocking logic, and existing app behavior.
+- Existing five-tab navigation and tab order.
+- Shorts, Apps, and Websites categories.
+- Always-on and Focus-only app modes.
+- Search, Block All / Unblock all, per-app toggles, essential-app exclusions, and undo behavior.
+- Schedule storage, schedule activation, templates, and editor behavior.
+- Stats calculations, historical data, charts, rewards, and screen-time permission flow.
+- Accessibility blocking service, persistence, and settings.
 
-## Build status
-Source edits are included. This environment does not have the Android SDK/Gradle installation needed to produce and verify an APK. Build and test in Android Studio before release.
+## Validation
+- Source archive inspected and edited.
+- Basic changed-source sanity checks passed.
+- A Gradle/Android SDK build could not be run in this environment because the project archive does not include a Gradle wrapper and no Gradle installation or Android SDK was available. Install/build with Android Studio before publishing.

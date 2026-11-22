@@ -20,11 +20,11 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
     private val softness = 0.6f
     private val linger = 1f
     private val hold = 1.6f
-    private val contrast = 1.08f
+    private val contrast = 0.94f
 
     // Keep the page matte separate from the portrait's warmer two-tone ink.
     private val ink = if (dark) Color.parseColor("#FFEFD9") else Color.parseColor("#4A2A12")
-    private val toneLight = if (dark) Color.parseColor("#D99A65") else Color.parseColor("#E7A16C")
+    private val toneLight = if (dark) Color.parseColor("#D99A65") else Color.parseColor("#EAB58A")
     private val paper = if (dark) Color.parseColor("#21170F") else Color.parseColor("#FFF8F0")
 
     private var src: Bitmap? = null
@@ -65,7 +65,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
         src = try { ctx.assets.open("dither.png").use { BitmapFactory.decodeStream(it) } } catch (e: Exception) { null }
     }
 
-    private fun toned(v: Float): Float = Math.pow(((v - 0.5f) * contrast + 0.5f).coerceIn(0f, 1f).toDouble(), 1.6).toFloat()
+    private fun toned(v: Float): Float = Math.pow(((v - 0.5f) * contrast + 0.5f).coerceIn(0f, 1f).toDouble(), 0.82).toFloat()
     private fun bayer(x: Int, y: Int): Float {
         val a = x and 7; val b = y and 7; val v = a xor b
         val m = ((v and 1) shl 5) or ((b and 1) shl 4) or ((v and 2) shl 2) or ((b and 2) shl 1) or ((v and 4) shr 1) or ((b and 4) shr 2)
@@ -80,7 +80,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
     override fun onMeasure(wSpec: Int, hSpec: Int) {
         val w = MeasureSpec.getSize(wSpec)
         val b = src
-        val h = if (b != null && w > 0) (w * b.height / b.width.toFloat()).toInt().coerceIn((190f * d).toInt(), (300f * d).toInt())
+        val h = if (b != null && w > 0) (w * b.height / b.width.toFloat() / 0.80f).toInt().coerceIn((200f * d).toInt(), (360f * d).toInt())
         else (260f * d).toInt()
         setMeasuredDimension(w, h)
     }
@@ -91,7 +91,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
         if (w <= 0 || h <= 0) return
         // contain-fit rect
         // the photo lives in the upper 80%; the bottom 20% is the paper-to-page gradient
-        val regionH = h.toFloat()
+        val regionH = h * 0.80f
         val s = min(w / bmp.width.toFloat(), regionH / bmp.height.toFloat())
         val iw = bmp.width * s; val ih = bmp.height * s
         dst.set((w - iw) / 2f, (regionH - ih) / 2f, (w + iw) / 2f, (regionH + ih) / 2f)
@@ -153,7 +153,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
                 val x = if (dir > 0) i else cols - 1 - i
                 val p = y * cols + x
                 val old = vals[p]
-                val q = if (old >= 0.5f) 1f else 0f
+                val q = if (old >= 0.44f) 1f else 0f
                 val err = old - q
                 val inImg = (x + 0.5f) * cell >= dst.left && (x + 0.5f) * cell <= dst.right &&
                     (y + 0.5f) * cell >= dst.top && (y + 0.5f) * cell <= dst.bottom
@@ -261,7 +261,7 @@ class DitherVeil(ctx: Context, private val dark: Boolean, private val edgeColor:
     private fun drawFade(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat()
         fadeP.shader = fBot
-        c.drawRect(0f, h * 0.94f, w, h, fadeP)
+        c.drawRect(0f, h * 0.80f - 1f, w, h, fadeP)
     }
 
     private fun blurred(src: Bitmap, f: Int): Bitmap {

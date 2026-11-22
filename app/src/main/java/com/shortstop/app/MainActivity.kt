@@ -1224,15 +1224,15 @@ class MainActivity : Activity() {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = round(pal.ink, 40)
+            background = round(if (pal.dark) Color.WHITE else Color.BLACK, 40)
             setPadding(dp(26), dp(12), dp(12), dp(12))
             isClickable = true
             setOnClickListener { showStartSheet() }
             press(this)
         }
-        bar.addView(tv("Start focus timer", 16f, fonts.semi, pal.canvas), lp(0, wrapC, 1f))
-        bar.addView(tv("▶", 16f, fonts.bold, pal.ink, Gravity.CENTER).apply {
-            background = round(pal.canvas, 40)
+        bar.addView(tv("Start focus timer", 16f, fonts.semi, if (pal.dark) Color.BLACK else Color.WHITE), lp(0, wrapC, 1f))
+        bar.addView(tv("▶", 16f, fonts.bold, if (pal.dark) Color.WHITE else Color.BLACK, Gravity.CENTER).apply {
+            background = round(if (pal.dark) Color.BLACK else Color.WHITE, 40)
         }, lp(dp(44), dp(44)))
         val barWrap = LinearLayout(this).apply { setPadding(dp(20), dp(10), dp(20), dp(14)) }
         barWrap.addView(bar, lp(matchP, wrapC))
@@ -2007,9 +2007,9 @@ class MainActivity : Activity() {
         // Dither Veil: burn through the 1-bit photo with a finger
         val veil = DitherVeil(this, pal.dark, pal.canvas)
         content.addView(veil, lp(matchP, wrapC))
-        content.addView(display("Create your\nstudy schedule", 21f).apply {
+        content.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(8), dp(12), dp(8), dp(18))
+            setPadding(dp(8), dp(2), dp(8), dp(22))
         }, lp(matchP, wrapC))
         val templates = listOf(
             Triple("Morning Study", 6 * 60, 8 * 60),
@@ -2017,8 +2017,8 @@ class MainActivity : Activity() {
             Triple("Evening Study", 18 * 60, 20 * 60),
             Triple("Night Study", 20 * 60, 22 * 60)
         )
-        val cardW = screenW - dp(48)
-        val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(4), 0, dp(4), 0) }
+        val cardW = screenW - dp(76)
+        val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(14), 0, dp(14), 0) }
         templates.forEachIndexed { i, (n, st, en) ->
             val c = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -2061,7 +2061,7 @@ class MainActivity : Activity() {
                 press(this)
             }
             c.addView(add, lp(dp(34), dp(34)))
-            strip.addView(c, lp(cardW, wrapC).apply { marginStart = dp(4); marginEnd = dp(4) })
+            strip.addView(c, lp(cardW, wrapC).apply { marginStart = dp(6); marginEnd = dp(6) })
         }
         val hs = android.widget.HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false

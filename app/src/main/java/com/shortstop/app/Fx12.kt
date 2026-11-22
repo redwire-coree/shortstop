@@ -168,7 +168,7 @@ class BlockBars(
                 bar.shader = null
             }
             if (s < 0.99f) {
-                bar.color = mixColor(pal.track, pal.ink, if (i == today) 0.5f else 0f)
+                bar.color = if (pal.dark) Color.WHITE else Color.BLACK
                 bar.alpha = (255 * (1f - s)).toInt()
                 c.drawRoundRect(rect, rr, rr, bar)
             }
@@ -187,7 +187,7 @@ class BlockBars(
             val barTop = base - (if (vals[sel] == 0) 7f * d else Math.max(10f * d, chartH * 0.94f * vals[sel] / mx)) * rv
             val by = (barTop - tipH + 2f * d).coerceAtLeast(0f)
             rect.set(bx0, by, bx0 + tw, by + 24f * d)
-            tip.color = pal.ink
+            tip.color = Color.parseColor(if (pal.dark) "#F0A15F" else "#F47A24")
             c.drawRoundRect(rect, 12f * d, 12f * d, tip)
             tipTxt.color = pal.canvas
             c.drawText(txt, bx0 + tw / 2f, by + 12f * d - (tipTxt.ascent() + tipTxt.descent()) / 2f, tipTxt)
