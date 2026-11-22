@@ -277,8 +277,8 @@ class MainActivity : Activity() {
             if (top) topMargin = dp(y) else bottomMargin = dp(110)
         })
         v.postDelayed({ v.say(line); if (move != Move.ENTER) v.play(move, 1f, true) }, if (move == Move.ENTER) 500L else 900L)
-        v.postDelayed({ v.say(null); v.play(Move.EXIT) }, ms + 900L)
-        v.postDelayed({ root.removeView(v) }, ms + 1500L)
+        v.postDelayed({ v.say(null); v.play(Move.EXIT, force = true) }, ms + 900L)
+        v.postDelayed({ if (v.parent === root) root.removeView(v) }, ms + 1450L)
     }
 
     private fun maybeNudge() {
@@ -291,21 +291,18 @@ class MainActivity : Activity() {
             bottomMargin = dp(150); leftMargin = dp(6)
         })
         nudge = v
-        v.say("Ready when you are.")
-        // A single soft acknowledgement; no looping dance and no persistent speech bubble.
-        v.play(Move.NOD, force = true)
+        v.say("A little focus time?")
+        v.play(Move.ENCOURAGE, force = true)
         v.setOnClickListener { dismissNudge(); showStartSheet() }
-        v.contentDescription = "Orange mascot. Tap to start a focus session."
-        v.postDelayed({ if (nudge === v) v.say(null) }, 3600L)
-        v.postDelayed({ if (nudge === v) dismissNudge() }, 5600L)
+        v.postDelayed({ if (nudge === v) dismissNudge() }, 9000L)
     }
 
     private fun dismissNudge() {
         val v = nudge ?: return
         nudge = null
         v.say(null)
-        v.play(Move.EXIT, force = true)
-        v.postDelayed({ (v.parent as? ViewGroup)?.removeView(v) }, 520L)
+        v.play(Move.EXIT)
+        v.postDelayed({ (v.parent as? ViewGroup)?.removeView(v) }, 500L)
     }
 
     private fun showTour() {
@@ -347,7 +344,7 @@ class MainActivity : Activity() {
             tourView = null
             box.animate().alpha(0f).setDuration(220).withEndAction { root.removeView(box) }.start()
             if (tab != 0) selectTab(0)
-            if (done) orangeSay(Move.CHEER, "You're all set!", true, 1700L)
+            if (done) orangeSay(Move.CELEBRATE, "You're all set!", true, 1900L)
         }
         fun showStep(i: Int) {
             val (line, tabTo, spot) = steps[i]
@@ -1487,7 +1484,7 @@ class MainActivity : Activity() {
         val goalNow = Store.goalMin(this)
         val todayNow = Store.focusMinutesAgo(this, 0)
         val goalHit = last.done && goalNow > 0 && todayNow >= goalNow && todayNow - last.minutes < goalNow
-        orangeSay(if (last.done) Move.CHEER else Move.OOPS,
+        orangeSay(if (last.done) Move.CELEBRATE else Move.OOPS,
             if (goalHit) "Daily goal done!" else if (last.done) "Nice focus!" else "Next one counts.", true, 1700L, 170)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(4)) }
         val tag = last.tag.ifEmpty { "Focus" }
@@ -2166,9 +2163,8 @@ class MainActivity : Activity() {
         // Dither Veil: burn through the 1-bit photo with a finger
         content.gravity = Gravity.CENTER_VERTICAL
         val orange = OrangeView(this, fonts, pal.dark, 92f)
-        orange.say("Tap + to add!")
-        // A single subtle acknowledgement; no endless animation loop in an empty state.
-        orange.play(Move.NOD, force = true)
+        orange.say("Ready when you are!")
+        orange.play(Move.LISTEN, force = true)
         content.addView(orange, lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL })
         content.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
