@@ -465,6 +465,8 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         ui.removeCallbacks(ticker)
+        // Do not let an idle timer change the mascot's pose while the Activity is backgrounded.
+        companionOrange?.removeCallbacks(sleepRun)
         super.onPause()
     }
 
@@ -1262,15 +1264,18 @@ class MainActivity : Activity() {
 
         // Orange lives here on the idle Focus screen: breathing, blinking, glancing, reacting to taps, dozing off when left alone
         val comp = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
-        val co = OrangeView(this, fonts, pal.dark, 62f)
+        val co = OrangeView(this, fonts, pal.dark, 56f)
         co.setOnClickListener { scheduleSleep() }
-        comp.addView(co, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.START or Gravity.BOTTOM).apply { marginStart = dp(-38) })
+        // OrangeView reserves a wide canvas for its optional speech bubble. Its actual
+        // character is drawn near the left edge; a negative host margin clipped half of him.
+        // Keep the view inside the row and give the text a measured, non-overlapping lane.
+        comp.addView(co, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.START or Gravity.CENTER_VERTICAL))
         val ct = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         ct.addView(tv("Orange", 15f, fonts.semi, FocusTheme.title(pal.dark)), lp(wrapC, wrapC))
         val cs = tv("", 13f, fonts.regular, FocusTheme.muted(pal.dark)).apply { setPadding(0, dp(2), 0, 0) }
         ct.addView(cs, lp(wrapC, wrapC))
         ct.setOnClickListener { if (!Store.focusRunning(this)) showStartSheet() }
-        comp.addView(ct, FrameLayout.LayoutParams(matchP, wrapC, Gravity.CENTER_VERTICAL).apply { marginStart = dp(86) })
+        comp.addView(ct, FrameLayout.LayoutParams(matchP, wrapC, Gravity.CENTER_VERTICAL).apply { marginStart = dp(72) })
         companion = comp; companionOrange = co; companionSub = cs
         col.addView(comp, lp(matchP, dp(92)).apply { topMargin = dp(10) })
 

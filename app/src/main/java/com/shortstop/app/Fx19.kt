@@ -800,11 +800,22 @@ class OrangeView(
                 removeCallbacks(longPress)
                 if (!longFired) {
                     val now = SystemClock.uptimeMillis()
-                    // cooldown: repeated taps do not stack animations, and a focus session is never interrupted
-                    if (now - lastTap > 450L && move != Move.FOCUS && !busy) {
-                        tapRun = if (now - lastTap < 2500L) tapRun + 1 else 1
-                        lastTap = now
-                        play(if (tapRun >= 3) { tapRun = 0; Move.GIGGLE } else Move.TAP)
+                    // Count deliberate taps even while the short TAP reaction is settling.
+                    // The old `!busy` guard made the three-tap GIGGLE effectively unreachable:
+                    // TAP lasts 500 ms, longer than the old 450 ms tap cooldown.
+                    // Never interrupt a focus/break pose or a higher-priority celebration.
+                    if (move != Move.FOCUS && move != Move.BREAK &&
+                        (!busy || prio(move) <= prio(Move.TAP))) {
+                        if (now - lastTap >= 220L) {
+                            tapRun = if (now - lastTap < 2500L) tapRun + 1 else 1
+                            lastTap = now
+                            if (tapRun >= 3) {
+                                tapRun = 0
+                                play(Move.GIGGLE, force = true)
+                            } else {
+                                play(Move.TAP, force = true)
+                            }
+                        }
                     }
                     if (hasOnClickListeners()) performClick()
                 }
