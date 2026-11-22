@@ -74,7 +74,7 @@ class OrangeView(
     private val s = sizeDp * d
     private val k = s / 640f
     private val calm = FocusTheme.reducedMotion(ctx)
-    private val amp = if (calm) 0.28f else 1f
+    private val amp = if (calm) 0.6f else 1f
     private val spd = if (calm) 0.75f else 1f
     private val art = OrangeArt.ensure(ctx)
     private val L = OrangeArt.layers
@@ -98,6 +98,7 @@ class OrangeView(
     private var loopGap = 1600L
     private var nextAt = 0L
     private var lastTap = 0L
+    private var tapRun = 0
     private var longFired = false
     private var attached = false
     private var winVisible = true
@@ -800,7 +801,11 @@ class OrangeView(
                 if (!longFired) {
                     val now = SystemClock.uptimeMillis()
                     // cooldown: repeated taps do not stack animations, and a focus session is never interrupted
-                    if (now - lastTap > 450L && move != Move.FOCUS && !busy) { lastTap = now; play(Move.TAP) }
+                    if (now - lastTap > 450L && move != Move.FOCUS && !busy) {
+                        tapRun = if (now - lastTap < 2500L) tapRun + 1 else 1
+                        lastTap = now
+                        play(if (tapRun >= 3) { tapRun = 0; Move.GIGGLE } else Move.TAP)
+                    }
                     if (hasOnClickListeners()) performClick()
                 }
                 return true

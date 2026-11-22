@@ -83,6 +83,12 @@ class MainActivity : Activity() {
     private var schedHeadCard: View? = null
     private var runExtras: View? = null
     private var calmOrange: OrangeView? = null
+    private var companion: FrameLayout? = null
+    private var companionOrange: OrangeView? = null
+    private var companionSub: TextView? = null
+    private val sleepRun = Runnable {
+        if (tab == 0 && tourView == null && !Store.focusRunning(this)) companionOrange?.play(Move.SLEEP)
+    }
     private var calmBreak: Boolean? = null
     private var sitesCountView: OdometerView? = null
     private var suggestBox: ViewGroup? = null
@@ -237,7 +243,9 @@ class MainActivity : Activity() {
             val p = Store.prefs(this)
             if (!Store.focusRunning(this) && tourView == null && System.currentTimeMillis() - p.getLong("greet_at", 0L) > 6 * 3600_000L) {
                 p.edit().putLong("greet_at", System.currentTimeMillis()).apply()
-                orangeSay(Move.ENTER, "Hi, welcome back!", false, 1700L)
+                val c = companionOrange
+                if (c != null && tab == 0) { c.say("Hi, welcome back!"); c.play(Move.WAVE, 1f, true); c.postDelayed({ c.say(null) }, 2400L) }
+                else orangeSay(Move.ENTER, "Hi, welcome back!", false, 1700L)
             }
         }, 1500L)
     }
@@ -281,8 +289,36 @@ class MainActivity : Activity() {
         v.postDelayed({ if (v.parent === root) root.removeView(v) }, ms + 1450L)
     }
 
+    private fun scheduleSleep() {
+        val c = companionOrange ?: return
+        c.removeCallbacks(sleepRun)
+        c.postDelayed(sleepRun, 75_000L)
+    }
+
+    private fun refreshCompanion() {
+        val comp = companion ?: return
+        val running = Store.focusRunning(this)
+        comp.visibility = if (running || tourView != null) View.GONE else View.VISIBLE
+        if (running) return
+        val today = Store.focusMinutesAgo(this, 0)
+        val goal = Store.goalMin(this)
+        val goalMet = goal > 0 && today >= goal
+        val line = if (goalMet) "Daily goal done. So proud of you!"
+            else if (today > 0) "${fmtMin(today)} focused today. Keep it up."
+            else "Ready when you are. Tap me, or start a session."
+        companionSub?.let { if (it.text.toString() != line) it.text = line }
+        val p = Store.prefs(this)
+        val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+        if (goalMet && tab == 0 && p.getString("proud_day", "") != day) {
+            p.edit().putString("proud_day", day).apply()
+            companionOrange?.say("Goal reached!")
+            companionOrange?.play(Move.PROUD, 1f, true)
+            companionOrange?.postDelayed({ companionOrange?.say(null) }, 2600L)
+        }
+    }
+
     private fun maybeNudge() {
-        if (nudge != null || tab != 0 || tourView != null || Store.focusRunning(this)) return
+        if (companion != null || nudge != null || tab != 0 || tourView != null || Store.focusRunning(this)) return
         val now = System.currentTimeMillis()
         if (now - lastNudge < 90_000L) return
         lastNudge = now
@@ -309,6 +345,7 @@ class MainActivity : Activity() {
         val root = window.decorView as ViewGroup
         tourView?.let { root.removeView(it) }
         dismissNudge()
+        companion?.visibility = View.GONE
         val box = FrameLayout(this)
         val dim = TourDim(this)
         box.addView(dim, FrameLayout.LayoutParams(matchP, matchP))
@@ -342,6 +379,7 @@ class MainActivity : Activity() {
         fun finish(done: Boolean) {
             Store.prefs(this).edit().putBoolean("tour_done", true).apply()
             tourView = null
+            refreshCompanion()
             box.animate().alpha(0f).setDuration(220).withEndAction { root.removeView(box) }.start()
             if (tab != 0) selectTab(0)
             if (done) orangeSay(Move.CELEBRATE, "You're all set!", true, 1900L)
@@ -410,6 +448,7 @@ class MainActivity : Activity() {
         super.onResume()
         Store.finalizeFocus(this)
         window.decorView.postDelayed({ maybeNudge() }, 6000L)
+        scheduleSleep()
         refreshStatus()
         Cards.sync(this).let { got ->
             if (got.size == 1) toast("${Rarity.of(got[0]).name} card unlocked", "Find it in Stats.")
@@ -1053,6 +1092,7 @@ class MainActivity : Activity() {
 
     private fun closeSheet(animate: Boolean = true) {
         val layer = sheetLayer ?: return
+        companionOrange?.let { if (!Store.focusRunning(this)) it.play(Move.IDLE, 1f, true); scheduleSleep() }
         val panel = sheetPanel
         val scrim = sheetScrim
         val cb = sheetClose
@@ -1219,6 +1259,20 @@ class MainActivity : Activity() {
         setup.addView(stepper, lp(matchP, wrapC))
         setupCard = setup
         col.addView(setup, lp(matchP, wrapC).apply { topMargin = dp(18) })
+
+        // Orange lives here on the idle Focus screen: breathing, blinking, glancing, reacting to taps, dozing off when left alone
+        val comp = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
+        val co = OrangeView(this, fonts, pal.dark, 62f)
+        co.setOnClickListener { scheduleSleep() }
+        comp.addView(co, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.START or Gravity.BOTTOM).apply { marginStart = dp(-38) })
+        val ct = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        ct.addView(tv("Orange", 15f, fonts.semi, FocusTheme.title(pal.dark)), lp(wrapC, wrapC))
+        val cs = tv("", 13f, fonts.regular, FocusTheme.muted(pal.dark)).apply { setPadding(0, dp(2), 0, 0) }
+        ct.addView(cs, lp(wrapC, wrapC))
+        ct.setOnClickListener { if (!Store.focusRunning(this)) showStartSheet() }
+        comp.addView(ct, FrameLayout.LayoutParams(matchP, wrapC, Gravity.CENTER_VERTICAL).apply { marginStart = dp(86) })
+        companion = comp; companionOrange = co; companionSub = cs
+        col.addView(comp, lp(matchP, dp(92)).apply { topMargin = dp(10) })
 
         // Running session
         val run = LinearLayout(this).apply {
@@ -1416,6 +1470,7 @@ class MainActivity : Activity() {
         statsWrap?.visibility = if (running) View.GONE else View.VISIBLE
         startBar?.visibility = if (running) View.GONE else View.VISIBLE
         if (running) dismissNudge()
+        refreshCompanion()
         runExtras?.let { ex ->
             if (running && ex.visibility != View.VISIBLE) {
                 ex.visibility = View.VISIBLE
@@ -1484,8 +1539,15 @@ class MainActivity : Activity() {
         val goalNow = Store.goalMin(this)
         val todayNow = Store.focusMinutesAgo(this, 0)
         val goalHit = last.done && goalNow > 0 && todayNow >= goalNow && todayNow - last.minutes < goalNow
-        orangeSay(if (last.done) Move.CELEBRATE else Move.OOPS,
-            if (goalHit) "Daily goal done!" else if (last.done) "Nice focus!" else "Next one counts.", true, 1700L, 170)
+        val msg = if (goalHit) "Daily goal done!" else if (last.done) "Nice focus!" else "Next one counts."
+        val c = companionOrange
+        if (c != null && tab == 0) {
+            refreshCompanion()
+            if (goalHit) Store.prefs(this).edit().putString("proud_day", java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())).apply()
+            c.say(msg); c.play(if (last.done) Move.CELEBRATE else Move.OOPS, 1f, true)
+            c.postDelayed({ c.say(null) }, 2800L)
+            scheduleSleep()
+        } else orangeSay(if (last.done) Move.CELEBRATE else Move.OOPS, msg, true, 1700L, 170)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(4)) }
         val tag = last.tag.ifEmpty { "Focus" }
         val streak = Store.streak(this)
@@ -1828,6 +1890,7 @@ class MainActivity : Activity() {
     }
 
     private fun showStartSheet() {
+        companionOrange?.play(Move.THINK, 1f, true)
         var dur = Store.lastMinutes(this)
         var tag = Store.lastTag(this).let { if (it in Store.TAGS) it else Store.TAGS[0] }
         var strict = Store.strictDefault(this)
