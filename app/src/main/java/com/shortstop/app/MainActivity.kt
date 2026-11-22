@@ -692,7 +692,7 @@ class MainActivity : Activity() {
 
     /** The status bar takes the paper colour while the empty Schedule shows the veil, so they read as one surface. */
     private fun updateStatusBar(forceCanvas: Boolean = false) {
-        val paperOn = !forceCanvas && !pal.dark && tab == 1 && Store.schedules(this).isEmpty()
+        val paperOn = false
         val to = when {
             paperOn -> pal.canvas
             !forceCanvas && (tab == 0 || tab == 1) -> FocusTheme.bg(pal.dark)
@@ -2006,8 +2006,7 @@ class MainActivity : Activity() {
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val screenW = resources.displayMetrics.widthPixels
         // Dither Veil: burn through the 1-bit photo with a finger
-        val veil = DitherVeil(this, pal.dark, pal.canvas)
-        content.addView(veil, lp(matchP, 0, 1f))
+        content.gravity = Gravity.CENTER_VERTICAL
         content.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(2), dp(8), dp(22))
