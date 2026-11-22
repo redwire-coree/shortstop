@@ -1344,7 +1344,7 @@ class MainActivity : Activity() {
         })
         // OrangeView keeps a wide canvas for speech bubbles; offset that canvas so the
         // mascot itself—not the empty bubble lane—sits in the card's top-right corner.
-        calmOrange.translationX = dp(78).toFloat()
+        calmOrange?.translationX = dp(78).toFloat()
         runningCard = runWrap
         col.addView(runWrap, lp(matchP, wrapC).apply { topMargin = dp(18) })
 
