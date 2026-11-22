@@ -14,6 +14,8 @@ import kotlin.random.Random
 
 enum class Move { ENTER, EXIT, IDLE, HOP, NOD, WAVE, POINT, CHEER, THINK, OOPS, FOCUS, BREAK, TASK, SURPRISE, TAP, GIGGLE, LISTEN, SLEEP, PROUD, ENCOURAGE, CELEBRATE }
 
+enum class OrangeScenario { NONE, BEGGING, DEAD, PANIC, CRYING, FINAL_BOSS, OVERLOAD, VICTORY }
+
 /**
  * Orange's artwork as separate, aligned layers (body, leaf, eye whites, pupils, highlights, mouth, sparks).
  * They were cut from the 4K source and the gaps behind them were filled in, so the pieces recombine into the
@@ -80,6 +82,24 @@ class OrangeView(
     private val L = OrangeArt.layers
 
     var interactive = true
+
+    // Scenario effects are independent of one-shot moves. Each scenario is a deterministic,
+    // elapsed-time loop: no per-frame particle allocations, Handler chains or accumulated state.
+    private var scenario: OrangeScenario = OrangeScenario.NONE
+    private var scenarioStartedAt = 0L
+
+    fun setScenarioLoop(value: OrangeScenario) {
+        if (scenario == value) return
+        scenario = value
+        scenarioStartedAt = SystemClock.uptimeMillis()
+        if (value != OrangeScenario.NONE) {
+            loopMoves = null
+            play(Move.IDLE, force = true)
+        }
+        invalidate()
+    }
+
+    fun clearScenarioLoop() = setScenarioLoop(OrangeScenario.NONE)
 
     private val vw = s * 2.7f
     private val vh = s * 1.75f
@@ -751,6 +771,14 @@ class OrangeView(
         }
         c.restore()
 
+        // Scenario VFX are drawn above the character but below the speech bubble.
+        if (scenario != OrangeScenario.NONE) {
+            OrangeScenarioVfx.draw(
+                c, scenario, (now - scenarioStartedAt).coerceAtLeast(0L) / 1000f,
+                mLeft, mTop, s, d, calm
+            )
+        }
+
         // speech bubble
         val lay = layout
         if (lay != null) {
@@ -780,7 +808,7 @@ class OrangeView(
 
         // schedule the next frame: full speed only while something is actually moving
         if (attached && winVisible && isShown) {
-            val moving = busy || blinkStart != 0L || abs(leafV) > 0.4f || abs(leafA - leafBias) > 0.15f || lm != null
+            val moving = busy || blinkStart != 0L || abs(leafV) > 0.4f || abs(leafA - leafBias) > 0.15f || lm != null || scenario != OrangeScenario.NONE
             if (moving) postInvalidateOnAnimation() else postInvalidateDelayed(40)
         }
     }
