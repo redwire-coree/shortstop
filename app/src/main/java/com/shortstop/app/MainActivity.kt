@@ -1313,6 +1313,7 @@ class MainActivity : Activity() {
         val endBtn = FuseButton(this, pal, fonts, "End session", "Undo", "Ended", 4000L,
             { if (Store.frozen(this)) { free(); false } else true }) {
             Store.endFocusEarly(this)
+            playEarlyQuitReaction()
             wasRunning = false
             updateRunning()
             fillFocusStats()
@@ -1339,8 +1340,11 @@ class MainActivity : Activity() {
         // one quiet Orange lives in the card's top-right corner for the whole session (not tappable)
         calmOrange = OrangeView(this, fonts, pal.dark, 52f).apply { interactive = false; isClickable = false; visibility = View.GONE }
         runWrap.addView(calmOrange, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.TOP or Gravity.END).apply {
-            topMargin = dp(-25); marginEnd = dp(-35)
+            topMargin = dp(62); marginEnd = dp(8)
         })
+        // OrangeView keeps a wide canvas for speech bubbles; offset that canvas so the
+        // mascot itself—not the empty bubble lane—sits in the card's top-right corner.
+        calmOrange.translationX = dp(78).toFloat()
         runningCard = runWrap
         col.addView(runWrap, lp(matchP, wrapC).apply { topMargin = dp(18) })
 
@@ -1445,12 +1449,29 @@ class MainActivity : Activity() {
     }
 
     private fun onBreakClick() {
+        val overload = !Store.onBreak(this) && Store.breaksLeft(this) <= 1
         if (Store.onBreak(this)) {
             Store.endBreak(this)
         } else if (Store.startBreak(this)) {
             toast("Break started. Blocks return when it ends.")
         }
         updateRunning()
+        if (overload) calmOrange?.let { c ->
+            c.play(Move.OVERLOAD, 1f, true)
+            c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.FOCUS, 1f, true) }, 3200L)
+        }
+    }
+
+    private fun playEarlyQuitReaction() {
+        val c = companionOrange ?: return
+        val prefs = Store.prefs(this)
+        val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+        val oldDay = prefs.getString("orange_quit_day", "")
+        val count = if (oldDay == day) prefs.getInt("orange_quit_count", 0) + 1 else 1
+        prefs.edit().putString("orange_quit_day", day).putInt("orange_quit_count", count).apply()
+        c.say(if (count >= 3) "Please don't give up on me!" else "Wait! One more minute?")
+        c.play(if (count >= 3) Move.DEAD else Move.BEGGING, 1f, true)
+        c.postDelayed({ c.say(null); if (c.isAttachedToWindow) c.play(Move.IDLE, 1f, true) }, 4200L)
     }
 
     private fun onEndClick() {
@@ -1460,6 +1481,7 @@ class MainActivity : Activity() {
             .setMessage("The focus time so far is saved.")
             .setPositiveButton("End session") { _, _ ->
                 Store.endFocusEarly(this)
+                playEarlyQuitReaction()
                 wasRunning = false
                 updateRunning()
                 fillFocusStats()
@@ -1518,13 +1540,17 @@ class MainActivity : Activity() {
             calmOrange?.let { c ->
                 if (c.visibility != View.VISIBLE) {
                     c.visibility = View.VISIBLE
-                    c.pivotX = dp(70).toFloat(); c.pivotY = dp(88).toFloat()
+                    c.pivotX = dp(26).toFloat(); c.pivotY = dp(30).toFloat()
                     c.scaleX = 0.2f; c.scaleY = 0.2f; c.alpha = 0f
-                    c.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(260).setDuration(620)
+                    c.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(80).setDuration(620)
                         .setInterpolator(SpringInterpolator(13f, 0.55f, 0.7f)).start()
+                    c.play(Move.ENTER, 1f, true)
+                    c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.PANIC, 1f, true) }, 2150L)
+                    c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.FOCUS, 1f, true) }, 4650L)
                 }
             }
-            if (calmBreak != onBreak) { calmBreak = onBreak; calmOrange?.play(if (onBreak) Move.BREAK else Move.FOCUS, 1f, true) }
+            if (calmBreak == null) calmBreak = onBreak
+            else if (calmBreak != onBreak) { calmBreak = onBreak; calmOrange?.play(if (onBreak) Move.BREAK else Move.FOCUS, 1f, true) }
             runLabel?.text = if (onBreak) "On break" else "Focusing"
             runElapsed?.text = clock(now - start)
         } else {
@@ -1549,8 +1575,14 @@ class MainActivity : Activity() {
         if (c != null && tab == 0) {
             refreshCompanion()
             if (goalHit) Store.prefs(this).edit().putString("proud_day", java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())).apply()
-            c.say(msg); c.play(if (last.done) Move.CELEBRATE else Move.OOPS, 1f, true)
-            c.postDelayed({ c.say(null) }, 2800L)
+            val reaction = when {
+                last.done -> Move.VICTORY
+                last.minutes < 5 -> Move.CRYING
+                last.minutes >= 45 -> Move.FINAL_BOSS
+                else -> Move.BEGGING
+            }
+            c.say(msg); c.play(reaction, 1f, true)
+            c.postDelayed({ c.say(null); if (c.isAttachedToWindow) c.play(Move.IDLE, 1f, true) }, 4200L)
             scheduleSleep()
         } else orangeSay(if (last.done) Move.CELEBRATE else Move.OOPS, msg, true, 1700L, 170)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(4)) }

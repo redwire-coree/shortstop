@@ -12,9 +12,7 @@ import android.view.View
 import kotlin.math.*
 import kotlin.random.Random
 
-enum class Move { ENTER, EXIT, IDLE, HOP, NOD, WAVE, POINT, CHEER, THINK, OOPS, FOCUS, BREAK, TASK, SURPRISE, TAP, GIGGLE, LISTEN, SLEEP, PROUD, ENCOURAGE, CELEBRATE }
-
-enum class OrangeScenario { NONE, BEGGING, DEAD, PANIC, CRYING, FINAL_BOSS, OVERLOAD, VICTORY }
+enum class Move { ENTER, EXIT, IDLE, HOP, NOD, WAVE, POINT, CHEER, THINK, OOPS, FOCUS, BREAK, TASK, SURPRISE, TAP, GIGGLE, LISTEN, SLEEP, PROUD, ENCOURAGE, CELEBRATE, BEGGING, DEAD, PANIC, CRYING, FINAL_BOSS, OVERLOAD, VICTORY }
 
 /**
  * Orange's artwork as separate, aligned layers (body, leaf, eye whites, pupils, highlights, mouth, sparks).
@@ -83,24 +81,6 @@ class OrangeView(
 
     var interactive = true
 
-    // Scenario effects are independent of one-shot moves. Each scenario is a deterministic,
-    // elapsed-time loop: no per-frame particle allocations, Handler chains or accumulated state.
-    private var scenario: OrangeScenario = OrangeScenario.NONE
-    private var scenarioStartedAt = 0L
-
-    fun setScenarioLoop(value: OrangeScenario) {
-        if (scenario == value) return
-        scenario = value
-        scenarioStartedAt = SystemClock.uptimeMillis()
-        if (value != OrangeScenario.NONE) {
-            loopMoves = null
-            play(Move.IDLE, force = true)
-        }
-        invalidate()
-    }
-
-    fun clearScenarioLoop() = setScenarioLoop(OrangeScenario.NONE)
-
     private val vw = s * 2.7f
     private val vh = s * 1.75f
     private val mLeft = s * 0.12f
@@ -120,6 +100,13 @@ class OrangeView(
     private var lastTap = 0L
     private var tapRun = 0
     private var longFired = false
+    // Petting is an overlay reaction: it never replaces the active focus/break animation.
+    private var petAt = 0L
+    private var petSide = 1f
+    private var petStrength = 0f
+    // A tactile press is a separate, reversible squash overlay; it never changes the active move.
+    private var touchHeld = false
+    private var touchSquash = 0f
     private var attached = false
     private var winVisible = true
 
@@ -165,6 +152,8 @@ class OrangeView(
         quadTo(-0.18f, 0.18f, -1f, 0f); quadTo(-0.18f, -0.18f, 0f, -1f); close()
     }
     private val rect = RectF()
+    private val scenarioFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val scenarioStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
     private val gridC = 14; private val gridR = 12
     private val verts = FloatArray((gridC + 1) * (gridR + 1) * 2)
     private val enterSpring = SpringInterpolator(14f, 0.5f, 0.9f)
@@ -192,7 +181,8 @@ class OrangeView(
     private val tail = Path()
 
     private val longPress = Runnable {
-        if (interactive && move != Move.FOCUS && !busy) { longFired = true; play(Move.SURPRISE) }
+        if (interactive && (move == Move.FOCUS || move == Move.BREAK)) { longFired = true; petAt = SystemClock.uptimeMillis(); petStrength = 1f; performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); invalidate() }
+        else if (interactive && !busy) { longFired = true; play(Move.SURPRISE) }
     }
 
     // ---- public API
@@ -212,6 +202,7 @@ class OrangeView(
         Move.FOCUS, Move.BREAK -> 4; Move.NOD, Move.WAVE, Move.POINT -> 3; Move.HOP, Move.THINK -> 2
         Move.CELEBRATE -> 8; Move.GIGGLE, Move.PROUD -> 6; Move.ENCOURAGE -> 5
         Move.TAP -> 1; Move.LISTEN, Move.SLEEP -> 2; Move.IDLE -> 0
+        Move.BEGGING, Move.DEAD, Move.PANIC, Move.CRYING, Move.FINAL_BOSS, Move.OVERLOAD, Move.VICTORY -> 9
     }
 
     private fun capturePose() {
@@ -406,6 +397,15 @@ class OrangeView(
                 rot = 0.3f * sin(t * 0.7f)
                 eyeOpenT = 0.84f; mouthMode = 1; lookYT = 0.05f
                 blinkQuiet = 0.45f
+                // A short, soft acknowledgement when the user pets Orange during focus.
+                val petAge = if (petAt == 0L) 9f else ((SystemClock.uptimeMillis() - petAt) / 1000f).coerceAtLeast(0f)
+                val pet = if (petAge < 0.90f) sin(Math.PI * (petAge / 0.90f)).toFloat() else 0f
+                dy -= s * 0.035f * pet
+                sx += 0.035f * pet; sy -= 0.045f * pet
+                rot += petSide * 2.2f * pet
+                happyT = max(happyT, pet * 0.85f)
+                lookXT = petSide * 0.24f * pet
+                leafKick = max(leafKick, pet * 0.9f)
                 return true
             }
             Move.BREAK -> {
@@ -509,6 +509,66 @@ class OrangeView(
                 spark = bump(t,0.16f,1.2f)*0.65f
                 return t < 1.55f
             }
+            Move.BEGGING -> {
+                // Sustained pleading: a soft tremble, forward lean, wide eyes and reaching arms.
+                val pulse = sin(t * 9.0f)
+                rot = -5f + 1.2f * pulse * amp; dy = -s * (0.018f + 0.012f * abs(pulse))
+                sx = 1f + 0.012f * pulse; sy = 1f - 0.018f * abs(pulse)
+                armL = 0.72f + 0.08f * pulse; armR = 0.78f - 0.08f * pulse
+                eyeOpenT = 1.18f; pupilT = 0.72f; lookYT = -0.12f; mouthMode = 2
+                leafKick = 0.35f * abs(pulse); blinkQuiet = 0.35f
+                return true
+            }
+            Move.DEAD -> {
+                // Quiet, intentionally restrained defeated pose with a slow settling breath.
+                val settle = 1f - exp(-3.5f * t)
+                rot = 88f * settle; dy = s * 0.20f * settle
+                sx = 1.06f; sy = 0.78f + 0.02f * sin(t * 1.4f)
+                eyeOpenT = 0.08f; pupilT = 0f; mouthMode = 2; armL = 0.1f; armR = 0.1f
+                leafBiasT = -22f
+                return true
+            }
+            Move.PANIC -> {
+                val pulse = sin(t * 15f); val fade = exp(-0.7f * t)
+                rot = 5.5f * pulse * fade * amp; dy = s * 0.025f * abs(pulse) * fade
+                sx = 1f + 0.025f * abs(pulse); sy = 1f - 0.035f * abs(pulse)
+                eyeOpenT = 1.24f; pupilT = 0.48f; mouthMode = 2
+                armL = 0.42f + 0.2f * pulse; armR = 0.42f - 0.2f * pulse
+                leafKick = 0.8f; blinkQuiet = 0.2f
+                return t < 2.4f
+            }
+            Move.CRYING -> {
+                val sob = abs(sin(t * 4.2f))
+                rot = 4f + 1.2f * sin(t * 2.1f); dy = s * 0.025f * sob
+                sx = 1f - 0.018f * sob; sy = 1f + 0.012f * sob
+                eyeOpenT = 0.55f + 0.08f * sob; happyT = 0f; mouthMode = 2
+                armL = 0.22f + 0.04f * sob; armR = 0.22f + 0.04f * sob
+                leafBiasT = -9f; blinkQuiet = 0.28f
+                return true
+            }
+            Move.FINAL_BOSS -> {
+                val pulse = sin(t * 2.7f)
+                rot = -3f + pulse * 1.1f; sy = 1.02f + 0.012f * pulse; sx = 0.99f
+                eyeOpenT = 0.78f; pupilT = 1.2f; lookYT = 0.12f; mouthMode = 1
+                armL = 0.68f; armR = 0.68f; leafBiasT = 8f; spark = 0.35f + 0.25f * abs(pulse)
+                return true
+            }
+            Move.OVERLOAD -> {
+                val wobble = sin(t * 7.5f)
+                rot = wobble * 8f * amp; sx = 1f + 0.045f * abs(wobble); sy = 1f - 0.055f * abs(wobble)
+                eyeOpenT = 1.18f; pupilT = 0.22f; mouthMode = 2
+                armL = 0.58f + 0.16f * wobble; armR = 0.58f - 0.16f * wobble
+                leafKick = 0.9f; thinking = true
+                return true
+            }
+            Move.VICTORY -> {
+                val pulse = sin(t * 5f)
+                dy = s * (0.035f + 0.025f * (0.5f + 0.5f * pulse))
+                sx = 1f - 0.018f * abs(pulse); sy = 1f + 0.025f * abs(pulse)
+                rot = 2.5f * sin(t * 2.5f); happyT = 1f; eyeOpenT = 1.05f
+                armL = 0.78f; armR = 0.78f; leafKick = 0.6f; stars = 0.85f
+                return true
+            }
             Move.IDLE -> {
                 val b = sin(t * 1.85f)   // ~3.4 s breath
                 sy = 1f + 0.014f * b; sx = 1f - 0.008f * b
@@ -557,8 +617,16 @@ class OrangeView(
         val drive = (-vy * 5.5f - vr * 0.055f + leafKick * 3.0f * sin(now / 90.0).toFloat()) * amp
         val target = leafBias + drive.coerceIn(-14f, 14f) + 0.9f * sin(now / 1400.0).toFloat() * (if (calm) 0.5f else 1f)
         val w = 16f; val z = 0.38f
-        val acc = w * w * (target - leafA) - 2f * z * w * leafV
-        leafV += acc * dt; leafA += leafV * dt
+        // Semi-implicit spring integration in bounded substeps. This keeps the leaf stable
+        // after dropped frames / app resume instead of injecting a visible velocity spike.
+        val frameDt = dt.coerceIn(0.001f, 0.05f)
+        val steps = ceil(frameDt / (1f / 120f)).toInt().coerceIn(1, 6)
+        val h = frameDt / steps
+        repeat(steps) {
+            val acc = w * w * (target - leafA) - 2f * z * w * leafV
+            leafV = (leafV + acc * h).coerceIn(-180f, 180f)
+            leafA = (leafA + leafV * h).coerceIn(-38f, 38f)
+        }
     }
 
     private fun blinkFactor(now: Long): Float {
@@ -645,6 +713,129 @@ class OrangeView(
         c.restore()
     }
 
+    /** Scenario-specific hand-drawn effects. These are time-based and deterministic, so loops stay smooth
+     * without allocating particle objects or relying on frame-count timing. Coordinates are mascot-local. */
+    private fun drawScenarioEffects(c: Canvas, now: Long, t: Float) {
+        val phase = t * (if (calm) 0.65f else 1f)
+        val cx0 = mLeft + s * 0.50f
+        val top = mTop + s * 0.08f
+        val bottom = feet - s * 0.02f
+        val fx = scenarioFill
+        val stroke = scenarioStroke
+        fun path(points: List<Pair<Float, Float>>, p: Paint) {
+            if (points.size < 2) return
+            val q = Path(); q.moveTo(points[0].first, points[0].second)
+            for (i in 1 until points.size) q.lineTo(points[i].first, points[i].second)
+            c.drawPath(q, p)
+        }
+        when (move) {
+            Move.BEGGING -> {
+                // Little trembling hands and a pleading sweat drop.
+                val pulse = sin(phase * 13f) * s * 0.012f
+                stroke.color = 0xFFFFA45C.toInt(); stroke.strokeWidth = s * 0.025f
+                path(listOf(Pair(cx0-s*.37f, bottom-s*.38f+pulse), Pair(cx0-s*.44f, bottom-s*.32f+pulse), Pair(cx0-s*.39f,bottom-s*.27f+pulse)), stroke)
+                path(listOf(Pair(cx0+s*.36f,bottom-s*.39f-pulse), Pair(cx0+s*.44f,bottom-s*.33f-pulse), Pair(cx0+s*.39f,bottom-s*.28f-pulse)), stroke)
+                val dropY = top + s * (0.22f + 0.035f * sin(phase * 5f))
+                fx.color = 0xFF70C9F5.toInt(); c.drawOval(cx0+s*.32f, dropY, cx0+s*.39f, dropY+s*.13f, fx)
+            }
+            Move.DEAD -> {
+                // Coffin frame and a small, softly rising spirit. The mascot remains visible inside it.
+                val l = cx0 - s*.49f; val r = cx0 + s*.49f; val y = bottom - s*.43f
+                stroke.color = 0xFF858A91.toInt(); stroke.strokeWidth = s*.045f
+                val coffin = Path().apply { moveTo(l+s*.12f,y-s*.24f); lineTo(l+s*.30f,y-s*.37f); lineTo(r-s*.30f,y-s*.37f); lineTo(r-s*.12f,y-s*.24f); lineTo(r,y+s*.22f); lineTo(l,y+s*.22f); close() }
+                c.drawPath(coffin, stroke)
+                stroke.color = 0xFFB9BEC5.toInt(); stroke.strokeWidth = s*.018f
+                c.drawLine(l+s*.13f,y+s*.10f,r-s*.13f,y+s*.10f,stroke)
+                // Crossed-out eyes are a clear, readable dead-state cue.
+                stroke.color = 0xFF5A3829.toInt(); stroke.strokeWidth = s*.035f
+                for (side in -1..1 step 2) {
+                    val ex = cx0 + side*s*.20f; val ey = top+s*.40f
+                    c.drawLine(ex-s*.045f,ey-s*.045f,ex+s*.045f,ey+s*.045f,stroke)
+                    c.drawLine(ex+s*.045f,ey-s*.045f,ex-s*.045f,ey+s*.045f,stroke)
+                }
+                val soulY = top - s * (0.08f + 0.13f * (0.5f + 0.5f*sin(phase*2.2f)))
+                fx.color = 0xFFEAF7FF.toInt(); c.drawOval(cx0-s*.12f,soulY,cx0+s*.12f,soulY+s*.19f,fx)
+                fx.color = 0xFF8D9BA8.toInt(); c.drawCircle(cx0-s*.045f,soulY+s*.08f,s*.012f,fx); c.drawCircle(cx0+s*.045f,soulY+s*.08f,s*.012f,fx)
+            }
+            Move.PANIC -> {
+                stroke.color = 0xFF73BFEF.toInt(); stroke.strokeWidth = s*.025f
+                for (side in -1..1 step 2) {
+                    val x = cx0 + side*s*.40f
+                    for (i in 0..2) { val yy = top+s*(.34f+i*.12f); c.drawLine(x,yy,x+side*s*.06f,yy-s*.055f,stroke) }
+                }
+            }
+            Move.CRYING -> {
+                fx.color = 0xFF56B8F4.toInt()
+                val wob = sin(phase*4.2f)
+                for (side in -1..1 step 2) {
+                    val x = cx0 + side*s*.22f
+                    // Each tear falls, fades, and respawns on a staggered phase for a seamless loop.
+                    val fall = ((phase * 0.72f + (if (side < 0) 0f else 0.48f)) % 1f + 1f) % 1f
+                    val y = top+s*(.37f + .16f * fall + .012f*wob)
+                    fx.alpha = (235f * (1f - 0.12f * fall)).toInt().coerceIn(0,255)
+                    val tear = Path().apply { moveTo(x,y); cubicTo(x-side*s*.10f,y+s*.12f,x+side*s*.10f,y+s*.17f,x,y+s*.22f); cubicTo(x-side*s*.08f,y+s*.17f,x+side*s*.08f,y+s*.12f,x,y); close() }
+                    c.drawPath(tear,fx)
+                    fx.alpha = 255
+                }
+            }
+            Move.FINAL_BOSS -> {
+                // Stylized flame tongues, pulsing at different phases for continuous motion.
+                for (i in 0..6) {
+                    val x = cx0 - s*.43f + i*s*.14f
+                    val h = s*(.13f + .07f*(.5f+.5f*sin(phase*5f+i*1.7f)))
+                    val y = bottom - s*.05f
+                    val flame = Path().apply { moveTo(x-s*.045f,y); cubicTo(x-s*.10f,y-h*.35f,x+s*.03f,y-h*.65f,x,y-h); cubicTo(x+s*.10f,y-h*.58f,x+s*.10f,y-h*.22f,x+s*.045f,y); close() }
+                    fx.color = if (i%2==0) 0xFFFF8B35.toInt() else 0xFFFFB34F.toInt(); c.drawPath(flame,fx)
+                    fx.color = 0xFFFFD27A.toInt(); c.drawOval(x-s*.018f,y-h*.42f,x+s*.018f,y-s*.015f,fx)
+                }
+                // Rising embers use fixed phase offsets: smooth, repeatable, allocation-free particles.
+                for (i in 0..8) {
+                    val p = ((phase * 0.42f + i * 0.137f) % 1f + 1f) % 1f
+                    val x = cx0 + sin(phase * 2.1f + i * 2.4f) * s * (.25f + .025f * i)
+                    val y = bottom - s * (.08f + p * .56f)
+                    fx.color = if (i % 2 == 0) 0xFFFFD27A.toInt() else 0xFFFF9B43.toInt()
+                    fx.alpha = (220f * (1f - p)).toInt().coerceIn(0,255)
+                    c.drawCircle(x,y,s*(.009f + .004f*(i%3)),fx)
+                }
+                fx.alpha = 255
+            }
+            Move.OVERLOAD -> {
+                fx.color = 0xFF9AA3AD.toInt()
+                for (i in 0..3) {
+                    val ph = phase*1.4f+i*1.55f
+                    val x = cx0 + sin(ph)*s*.31f
+                    val y = top + s*(.08f + .035f*cos(ph*1.3f))
+                    val rr = s*(.045f+.012f*(i%2))
+                    c.drawCircle(x,y,rr,fx)
+                }
+                stroke.color = 0xFF56616C.toInt(); stroke.strokeWidth = s*.025f
+                for (side in -1..1 step 2) {
+                    val x = cx0+side*s*.20f; val y=top+s*.40f
+                    val spiral=Path().apply { moveTo(x,y); for (j in 1..18) { val a=j*.48f; val rr=s*.006f*j; lineTo(x+cos(a)*rr,y+sin(a)*rr) } }
+                    c.drawPath(spiral,stroke)
+                }
+            }
+            Move.VICTORY -> {
+                val crownY = top - s*.015f + s*.018f*sin(phase*3f)
+                val crown = Path().apply { moveTo(cx0-s*.25f,crownY+s*.12f); lineTo(cx0-s*.30f,crownY-s*.05f); lineTo(cx0-s*.13f,crownY+s*.02f); lineTo(cx0,crownY-s*.14f); lineTo(cx0+s*.13f,crownY+s*.02f); lineTo(cx0+s*.30f,crownY-s*.05f); lineTo(cx0+s*.25f,crownY+s*.12f); close() }
+                fx.color = 0xFFFFC34F.toInt(); c.drawPath(crown,fx)
+                fx.color = 0xFFFFF0B3.toInt()
+                for (i in 0..4) { val a=phase*1.3f+i*1.256f; val x=cx0+cos(a)*s*.58f; val y=top+s*(.32f+sin(a*1.7f)*.18f); c.drawCircle(x,y,s*.018f,fx) }
+                // Confetti drifts down on offset loops instead of flashing in place.
+                for (i in 0..11) {
+                    val p = ((phase * .30f + i * .083f) % 1f + 1f) % 1f
+                    val x = cx0 + sin(i * 4.1f + phase * .7f) * s * (.30f + (i % 4) * .07f)
+                    val y = top + s * (.10f + p * .62f)
+                    fx.alpha = (210f * (1f - p)).toInt().coerceIn(0,255)
+                    fx.color = if (i % 2 == 0) 0xFFFFB34F.toInt() else 0xFF8ED8A6.toInt()
+                    c.drawCircle(x,y,s*.012f,fx)
+                }
+                fx.alpha = 255
+            }
+            else -> Unit
+        }
+    }
+
     override fun onDraw(c: Canvas) {
         val base = L["base"]
         if (!art || base == null) return
@@ -654,6 +845,14 @@ class OrangeView(
 
         var t = (now - t0) / 1000f * spd
         val running = pose(t)
+        // Smooth press-in / release-out response. The critically damped approach is frame-rate
+        // independent and is layered over the current pose, so a tap cannot cancel focus or a scenario.
+        val pressTarget = if (touchHeld) 1f else 0f
+        touchSquash += (pressTarget - touchSquash) * (1f - exp(-24.0 * dt).toFloat())
+        val pressPulse = touchSquash.coerceIn(0f, 1f)
+        sx += 0.035f * pressPulse
+        sy -= 0.055f * pressPulse
+        dy += s * 0.012f * pressPulse
         blendPose(now)
         if (!running && move == Move.EXIT) {
             busy = false
@@ -771,12 +970,15 @@ class OrangeView(
         }
         c.restore()
 
-        // Scenario VFX are drawn above the character but below the speech bubble.
-        if (scenario != OrangeScenario.NONE) {
-            OrangeScenarioVfx.draw(
-                c, scenario, (now - scenarioStartedAt).coerceAtLeast(0L) / 1000f,
-                mLeft, mTop, s, d, calm
-            )
+        // Character-attached scenario effects use the same entrance/exit transform and frame clock.
+        if (move == Move.BEGGING || move == Move.DEAD || move == Move.PANIC || move == Move.CRYING || move == Move.FINAL_BOSS || move == Move.OVERLOAD || move == Move.VICTORY) {
+            c.save()
+            c.translate(cx, feet)
+            c.scale(overallScale, overallScale)
+            c.translate(-cx, -feet - overallLift - dy)
+            c.rotate(rot, cx, feet)
+            drawScenarioEffects(c, now, t)
+            c.restore()
         }
 
         // speech bubble
@@ -808,7 +1010,13 @@ class OrangeView(
 
         // schedule the next frame: full speed only while something is actually moving
         if (attached && winVisible && isShown) {
-            val moving = busy || blinkStart != 0L || abs(leafV) > 0.4f || abs(leafA - leafBias) > 0.15f || lm != null || scenario != OrangeScenario.NONE
+            val petAnimating = petAt != 0L && now - petAt < 950L
+            val ambientLoop = move == Move.FOCUS || move == Move.BREAK || move == Move.IDLE ||
+                move == Move.BEGGING || move == Move.DEAD || move == Move.PANIC || move == Move.CRYING ||
+                move == Move.FINAL_BOSS || move == Move.OVERLOAD || move == Move.VICTORY
+            val moving = busy || petAnimating || blinkStart != 0L || abs(leafV) > 0.4f ||
+                abs(leafA - leafBias) > 0.15f || lm != null || ambientLoop
+            // Keep character motion on the display frame clock; only static/offscreen states may idle.
             if (moving) postInvalidateOnAnimation() else postInvalidateDelayed(40)
         }
     }
@@ -816,40 +1024,53 @@ class OrangeView(
     // ---- touch: a tap is a small playful reaction, a long press is a surprised one
     private fun hit(e: MotionEvent) = e.x >= mLeft && e.x <= mLeft + s && e.y >= mTop && e.y <= feet
 
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (!interactive || !hit(e)) return false
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                touchHeld = true
                 longFired = false
+                invalidate()
                 removeCallbacks(longPress); postDelayed(longPress, 480L)
                 return true
             }
             MotionEvent.ACTION_UP -> {
+                touchHeld = false
                 removeCallbacks(longPress)
+                invalidate()
                 if (!longFired) {
                     val now = SystemClock.uptimeMillis()
                     // Count deliberate taps even while the short TAP reaction is settling.
                     // The old `!busy` guard made the three-tap GIGGLE effectively unreachable:
                     // TAP lasts 500 ms, longer than the old 450 ms tap cooldown.
                     // Never interrupt a focus/break pose or a higher-priority celebration.
-                    if (move != Move.FOCUS && move != Move.BREAK &&
-                        (!busy || prio(move) <= prio(Move.TAP))) {
-                        if (now - lastTap >= 220L) {
+                    if (now - lastTap >= 220L) {
+                        if (move == Move.FOCUS || move == Move.BREAK) {
+                            // Interactable while working: a tap gives feedback but never interrupts focus.
+                            petAt = now
+                            petSide = if (e.x < width / 2f) -1f else 1f
+                            petStrength = 1f
                             tapRun = if (now - lastTap < 2500L) tapRun + 1 else 1
-                            lastTap = now
-                            if (tapRun >= 3) {
-                                tapRun = 0
-                                play(Move.GIGGLE, force = true)
-                            } else {
-                                play(Move.TAP, force = true)
-                            }
+                            if (tapRun >= 3) { tapRun = 0; say("You've got this!") ; postDelayed({ if (isAttachedToWindow) say(null) }, 1500L) }
+                            performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                            invalidate()
+                        } else if (!busy || prio(move) <= prio(Move.TAP)) {
+                            tapRun = if (now - lastTap < 2500L) tapRun + 1 else 1
+                            if (tapRun >= 3) { tapRun = 0; play(Move.GIGGLE, force = true) }
+                            else play(Move.TAP, force = true)
                         }
+                        lastTap = now
                     }
-                    if (hasOnClickListeners()) performClick()
+                    performClick()
                 }
                 return true
             }
-            MotionEvent.ACTION_CANCEL -> { removeCallbacks(longPress); return true }
+            MotionEvent.ACTION_CANCEL -> { touchHeld = false; removeCallbacks(longPress); invalidate(); return true }
         }
         return true
     }
