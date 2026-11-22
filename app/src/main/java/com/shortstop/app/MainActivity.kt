@@ -82,6 +82,8 @@ class MainActivity : Activity() {
     private var schedPageTitle: View? = null
     private var schedHeadCard: View? = null
     private var runExtras: View? = null
+    private var calmOrange: OrangeView? = null
+    private var calmBreak: Boolean? = null
     private var sitesCountView: OdometerView? = null
     private var suggestBox: ViewGroup? = null
     private var previewBox: LinearLayout? = null
@@ -1323,6 +1325,9 @@ class MainActivity : Activity() {
         }
         exApps = kv("Focus apps"); exHome = kv("Home screen"); exMode = kv("Mode")
         extras.addView(blocking, lp(matchP, wrapC).apply { topMargin = dp(12) })
+        // a quiet Orange keeps you company: slow breathing, soft blinks, no particles, not tappable
+        calmOrange = OrangeView(this, fonts, pal.dark, 84f).apply { interactive = false }
+        extras.addView(calmOrange, lp(wrapC, wrapC).apply { topMargin = dp(10); gravity = Gravity.CENTER_HORIZONTAL })
         val remind = Store.message(this)
         if (remind.isNotBlank()) {
             val rc = card().apply {
@@ -1449,9 +1454,11 @@ class MainActivity : Activity() {
                 b.alpha = if (Store.frozen(this)) 0.5f else 1f
             }
             runLattice?.running = !onBreak
+            if (calmBreak != onBreak) { calmBreak = onBreak; calmOrange?.play(if (onBreak) Move.BREAK else Move.FOCUS, 1f, true) }
             runLabel?.text = if (onBreak) "On break" else "Focusing"
             runElapsed?.text = clock(now - start)
         } else {
+            calmBreak = null
             runEndBtn?.reset()
             runRing?.stop()
         }
@@ -2358,6 +2365,7 @@ class MainActivity : Activity() {
             closeSheet()
             fillSchedules()
             refreshStatus()
+            if (existing == null) orangeSay(Move.TASK, "Schedule saved!", true, 1300L)
         }.apply {
             setTextColor(Color.WHITE)
             background = round(FocusCardColors.ORANGE, 40)
