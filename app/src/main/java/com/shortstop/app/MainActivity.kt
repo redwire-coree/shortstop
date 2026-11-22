@@ -1869,7 +1869,7 @@ class MainActivity : Activity() {
         page.addView(barWrap, lp(matchP, wrapC))
         fillSchedules()
         val root = FrameLayout(this)
-        root.addView(AmbientBackdrop(this, pal), FrameLayout.LayoutParams(matchP, matchP))
+        root.addView(AmbientBackdrop(this, pal, true), FrameLayout.LayoutParams(matchP, matchP))
         root.addView(page, FrameLayout.LayoutParams(matchP, matchP))
         return root
     }
@@ -2037,7 +2037,7 @@ class MainActivity : Activity() {
                     busy = true
                     val bmp = Bitmap.createBitmap(content.width, content.height, Bitmap.Config.ARGB_8888)
                     val cv = Canvas(bmp)
-                    cv.drawColor(pal.canvas)   // opaque, so the blur has no dark fringes
+                    cv.drawColor(FocusTheme.bg(pal.dark))   // opaque, so the blur has no dark fringes
                     content.draw(cv)
                     updateStatusBar(true)
                     // the blur lives above the whole screen so it can fade out over the new schedule list

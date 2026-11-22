@@ -18,7 +18,7 @@ import android.view.View
  * film grain (react-bits Noise) so the colour has texture instead of looking like a flat gradient. In dark mode
  * the same glows sit on black and carry the mood. Draws only while on screen.
  */
-class AmbientBackdrop(ctx: Context, private val pal: Palette) : View(ctx) {
+class AmbientBackdrop(ctx: Context, private val pal: Palette, private val rich: Boolean = false) : View(ctx) {
     private val glowA = Paint(Paint.ANTI_ALIAS_FLAG)
     private val glowB = Paint(Paint.ANTI_ALIAS_FLAG)
     private val grain = Paint()
@@ -27,6 +27,7 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette) : View(ctx) {
     private var sw = 0f
     private val m = Matrix()
     private val cloud = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val orb = Paint(Paint.ANTI_ALIAS_FLAG)
     private val clouds = ArrayList<Path>()
     private val calm = FocusTheme.reducedMotion(ctx)
     private val d = ctx.resources.displayMetrics.density
@@ -81,11 +82,18 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette) : View(ctx) {
         val t = if (calm) 0f else SystemClock.uptimeMillis() / 1000f
         c.drawColor(FocusTheme.bg(pal.dark))
         if (clouds.isEmpty()) {
-            for (r in floatArrayOf(46f, 92f, 38f, 70f)) clouds.add(puff(r * d))
+            val radii = if (rich) floatArrayOf(46f, 92f, 38f, 70f, 64f, 84f, 44f, 76f, 58f, 96f) else floatArrayOf(46f, 92f, 38f, 70f)
+            for (r in radii) clouds.add(puff(r * d))
         }
         cloud.color = Color.argb(if (pal.dark) 40 else 52, 255, 154, 61)
         // x, y (fraction of the page), drift period, phase
-        val spots = arrayOf(
+        val spots = if (rich) arrayOf(
+            floatArrayOf(0.06f, 0.08f, 9.0f, 0f), floatArrayOf(-0.02f, 0.50f, 11.0f, 1.7f),
+            floatArrayOf(0.98f, 0.24f, 8.0f, 3.1f), floatArrayOf(0.96f, 0.78f, 12.0f, 4.4f),
+            floatArrayOf(0.52f, 0.04f, 10.0f, 2.2f), floatArrayOf(0.18f, 0.88f, 13.0f, 0.9f),
+            floatArrayOf(0.74f, 0.52f, 9.5f, 5.0f), floatArrayOf(0.30f, 0.30f, 11.5f, 3.6f),
+            floatArrayOf(0.64f, 0.94f, 10.5f, 1.2f), floatArrayOf(0.02f, 0.70f, 12.5f, 2.8f)
+        ) else arrayOf(
             floatArrayOf(0.06f, 0.10f, 9.0f, 0f), floatArrayOf(-0.02f, 0.52f, 11.0f, 1.7f),
             floatArrayOf(0.98f, 0.30f, 8.0f, 3.1f), floatArrayOf(0.96f, 0.80f, 12.0f, 4.4f)
         )
@@ -98,8 +106,25 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette) : View(ctx) {
             c.translate(w * sp[0] + bob * 7f * d, h * sp[1] + Math.cos(k.toDouble()).toFloat() * 9f * d)
             val sc = 1f + 0.025f * bob
             c.scale(sc, sc)
+            if (rich) cloud.color = if (i % 2 == 0) Color.argb(if (pal.dark) 40 else 52, 255, 154, 61) else Color.argb(if (pal.dark) 34 else 44, 255, 106, 43)
             c.drawPath(clouds[i], cloud)
             c.restore()
+        }
+        if (rich) {
+            // ember orbs: soft orange glows that rise and sway on their own slow loops
+            val orbs = arrayOf(
+                floatArrayOf(0.22f, 0.20f, 14f, 0.3f, 0.34f), floatArrayOf(0.80f, 0.42f, 17f, 2.4f, 0.28f),
+                floatArrayOf(0.34f, 0.66f, 16f, 4.1f, 0.30f), floatArrayOf(0.86f, 0.86f, 15f, 1.1f, 0.26f)
+            )
+            for (o in orbs) {
+                val k = t * 6.2832f / o[2] + o[3]
+                val ox = w * o[0] + Math.sin(k.toDouble()).toFloat() * 14f * d
+                val oy = h * o[1] + Math.cos(k * 0.8).toFloat() * 18f * d
+                val rr = w * o[4]
+                orb.shader = RadialGradient(ox, oy, rr,
+                    Color.argb(if (pal.dark) 70 else 62, 255, 122, 43), Color.argb(0, 255, 122, 43), Shader.TileMode.CLAMP)
+                c.drawCircle(ox, oy, rr, orb)
+            }
         }
         m.setTranslate(w * (0.5f + 0.12f * Math.sin(t * 0.22).toFloat()), h * (0.26f + 0.03f * Math.cos(t * 0.19).toFloat()))
         shA!!.setLocalMatrix(m)
