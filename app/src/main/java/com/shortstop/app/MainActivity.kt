@@ -230,6 +230,7 @@ class MainActivity : Activity() {
         buildAll()
         loadApps()
         showLastCrash()
+        if (!Store.prefs(this).getBoolean("tour_done", false)) window.decorView.postDelayed({ showTour() }, 1400L)
     }
 
     // ---------- crash notes: the reason is saved, then shown once on the next start so it can be fixed ----------
@@ -251,6 +252,125 @@ class MainActivity : Activity() {
             } catch (x: Throwable) { }
             prev?.uncaughtException(t, e)
         }
+    }
+
+    // ---- Orange, the mascot
+    private var nudge: OrangeView? = null
+    private var lastNudge = 0L
+    private var tourView: View? = null
+
+    /** A short guest appearance: he drops in, reacts, says one line and leaves. Never blocks touches. */
+    private fun orangeSay(move: Move, line: String, top: Boolean, ms: Long) {
+        val root = window.decorView as ViewGroup
+        val v = OrangeView(this, fonts, pal.dark, 84f)
+        root.addView(v, FrameLayout.LayoutParams(wrapC, wrapC, (if (top) Gravity.TOP else Gravity.BOTTOM) or Gravity.CENTER_HORIZONTAL).apply {
+            if (top) topMargin = dp(64) else bottomMargin = dp(110)
+        })
+        v.postDelayed({ v.say(line); v.play(move) }, 450L)
+        v.postDelayed({ v.say(null); v.play(Move.EXIT) }, ms)
+        v.postDelayed({ root.removeView(v) }, ms + 500L)
+    }
+
+    private fun maybeNudge() {
+        if (nudge != null || tab != 0 || tourView != null || Store.focusRunning(this)) return
+        val now = System.currentTimeMillis()
+        if (now - lastNudge < 90_000L) return
+        lastNudge = now
+        val v = OrangeView(this, fonts, pal.dark, 84f)
+        rootFrame.addView(v, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.BOTTOM or Gravity.START).apply {
+            bottomMargin = dp(150); leftMargin = dp(6)
+        })
+        nudge = v
+        v.say("Tap to focus!")
+        v.loop(listOf(Move.HOP, Move.NOD, Move.HOP, Move.WAVE), 1200L)
+        v.setOnClickListener { dismissNudge(); showStartSheet() }
+        v.postDelayed({ if (nudge === v) dismissNudge() }, 9000L)
+    }
+
+    private fun dismissNudge() {
+        val v = nudge ?: return
+        nudge = null
+        v.say(null)
+        v.play(Move.EXIT)
+        v.postDelayed({ (v.parent as? ViewGroup)?.removeView(v) }, 500L)
+    }
+
+    private fun showTour() {
+        val root = window.decorView as ViewGroup
+        tourView?.let { root.removeView(it) }
+        dismissNudge()
+        val box = FrameLayout(this)
+        val dim = TourDim(this)
+        box.addView(dim, FrameLayout.LayoutParams(matchP, matchP))
+        val guide = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        val orange = OrangeView(this, fonts, pal.dark, 104f)
+        guide.addView(orange, lp(wrapC, wrapC))
+        val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val skip = tv("Skip", 14f, fonts.medium, Color.WHITE).apply { setPadding(dp(18), dp(12), dp(18), dp(12)); isClickable = true; alpha = 0.85f }
+        var next: TextView? = null
+        btns.addView(skip, lp(wrapC, wrapC))
+        guide.addView(btns, lp(wrapC, wrapC).apply { topMargin = dp(4) })
+        box.addView(guide, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            topMargin = (resources.displayMetrics.heightPixels * 0.17f).toInt()
+        })
+        box.isClickable = true
+        box.alpha = 0f
+        root.addView(box, FrameLayout.LayoutParams(matchP, matchP))
+        box.animate().alpha(1f).setDuration(260).start()
+        tourView = box
+
+        // text, tab to show, what to light up (-1 nothing, 0 the start bar, 1..4 nav slots)
+        val steps = listOf(
+            Triple("Hi! I'm Orange. Quick tour?", -1, -1),
+            Triple("Tap here to start a focus timer.", 0, 0),
+            Triple("Plan study blocks that start on their own.", 1, 2),
+            Triple("Pick the apps and sites to block.", 2, 3),
+            Triple("Watch your streak and win cards.", 3, 4),
+            Triple("Tweak anything here. Replay me anytime!", 4, 5)
+        )
+        var idx = 0
+        fun finish(done: Boolean) {
+            Store.prefs(this).edit().putBoolean("tour_done", true).apply()
+            tourView = null
+            box.animate().alpha(0f).setDuration(220).withEndAction { root.removeView(box) }.start()
+            if (tab != 0) selectTab(0)
+            if (done) orangeSay(Move.CHEER, "You're all set!", true, 2200L)
+        }
+        fun showStep(i: Int) {
+            val (line, tabTo, spot) = steps[i]
+            if (tabTo >= 0) selectTab(tabTo)
+            next?.text = if (i == 0) "Let's go" else if (i == steps.lastIndex) "Done" else "Next"
+            box.postDelayed({
+                var r: RectF? = null
+                val loc = IntArray(2)
+                if (spot == 0) {
+                    val sb = startBar
+                    if (sb != null && sb.visibility == View.VISIBLE && sb.width > 0) {
+                        sb.getLocationInWindow(loc)
+                        r = RectF(loc[0] + dp(14).toFloat(), loc[1] + dp(4).toFloat(), loc[0] + sb.width - dp(14).toFloat(), loc[1] + sb.height - dp(8).toFloat())
+                    }
+                } else if (spot >= 2) {
+                    val g = gooey
+                    if (g != null && g.width > 0) {
+                        g.getLocationInWindow(loc)
+                        val w5 = g.width / 5f
+                        r = RectF(loc[0] + w5 * (spot - 2) + dp(2), loc[1].toFloat(), loc[0] + w5 * (spot - 1) - dp(2), loc[1] + g.height.toFloat())
+                    }
+                }
+                dim.setTarget(r)
+                orange.say(line)
+                if (r == null) orange.play(if (i == 0) Move.WAVE else Move.HOP)
+                else orange.play(Move.POINT, if (r.centerX() < resources.displayMetrics.widthPixels / 2f) -1f else 1f)
+            }, 140L)
+        }
+        val nb = pill("Next", true) {
+            if (idx >= steps.lastIndex) finish(true) else { idx++; showStep(idx) }
+        }
+        next = nb
+        btns.addView(nb, 0, lp(wrapC, wrapC))
+        skip.setOnClickListener { finish(false) }
+        orange.play(Move.ENTER)
+        box.postDelayed({ showStep(0) }, 500L)
     }
 
     private fun showLastCrash() {
@@ -279,6 +399,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         Store.finalizeFocus(this)
+        window.decorView.postDelayed({ maybeNudge() }, 6000L)
         refreshStatus()
         Cards.sync(this).let { got ->
             if (got.size == 1) toast("${Rarity.of(got[0]).name} card unlocked", "Find it in Stats.")
@@ -731,6 +852,7 @@ class MainActivity : Activity() {
         stagger(nw)
         styleNav()
         updateStatusBar()
+        if (i == 0) window.decorView.postDelayed({ maybeNudge() }, 6000L) else dismissNudge()
     }
 
     private val stagAnims = ArrayList<ValueAnimator>()
@@ -1278,6 +1400,7 @@ class MainActivity : Activity() {
         runningCard?.visibility = if (running) View.VISIBLE else View.GONE
         statsWrap?.visibility = if (running) View.GONE else View.VISIBLE
         startBar?.visibility = if (running) View.GONE else View.VISIBLE
+        if (running) dismissNudge()
         runExtras?.let { ex ->
             if (running && ex.visibility != View.VISIBLE) {
                 ex.visibility = View.VISIBLE
@@ -1331,6 +1454,7 @@ class MainActivity : Activity() {
     private fun onSessionDone() {
         fillFocusStats()
         val last = Store.sessions(this).lastOrNull() ?: return
+        orangeSay(if (last.done) Move.CHEER else Move.OOPS, if (last.done) "Nice focus!" else "Next one counts.", true, 2600L)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(4)) }
         val tag = last.tag.ifEmpty { "Focus" }
         val streak = Store.streak(this)
@@ -2007,6 +2131,10 @@ class MainActivity : Activity() {
         val screenW = resources.displayMetrics.widthPixels
         // Dither Veil: burn through the 1-bit photo with a finger
         content.gravity = Gravity.CENTER_VERTICAL
+        val orange = OrangeView(this, fonts, pal.dark, 92f)
+        orange.say("Tap + to add!")
+        orange.loop(listOf(Move.HOP, Move.NOD, Move.WAVE, Move.HOP), 1500L)
+        content.addView(orange, lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL })
         content.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(2), dp(8), dp(22))
@@ -3478,6 +3606,7 @@ class MainActivity : Activity() {
         // Permissions and help
         val sPerm = sSection("Permissions and help")
         val fix = sCard()
+        fix.sAdd(sLink("Show me around", "Meet Orange and replay the quick tour") { showTour() })
         fix.sAdd(sRow("Accessibility service", "Needed to block Shorts and apps", sTrail(sStatus(serviceOn()))) { open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) })
         fix.sAdd(sRow("Notification access", "Lets Shortstop see notifications", sTrail(sStatus(notifAccess()))) { open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
         fix.sAdd(sRow("Usage access", "For screen time and stats", sTrail(sStatus(usageGranted()))) { open(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
