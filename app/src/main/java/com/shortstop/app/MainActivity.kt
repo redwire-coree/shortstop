@@ -628,7 +628,7 @@ class MainActivity : Activity() {
         pal = Palette(this)
         window.statusBarColor = pal.canvas
         statusNow = pal.canvas
-        window.navigationBarColor = pal.canvas
+        window.navigationBarColor = MonoPalette(this).canvas
         window.setBackgroundDrawable(ColorDrawable(pal.canvas))
         var flags = window.decorView.systemUiVisibility
         flags = if (pal.dark) {
@@ -657,17 +657,18 @@ class MainActivity : Activity() {
             holder.addView(p, FrameLayout.LayoutParams(matchP, matchP))
         }
         rootView.addView(holder, lp(matchP, 0, 1f))
-        rootView.addView(View(this).apply { setBackgroundColor(pal.border) }, lp(matchP, dp(1)))
+        val mono = MonoPalette(this)
+        rootView.addView(View(this).apply { setBackgroundColor(mono.border) }, lp(matchP, dp(1)))
 
         val nav = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(12), dp(8), dp(12), dp(10))
-            setBackgroundColor(pal.canvas)
+            setBackgroundColor(mono.canvas)
             clipChildren = false
             clipToPadding = false
         }
         rootView.clipChildren = false
-        val g = GooeyNav(this, pal, fonts, listOf("Focus", "Schedule", "Blocks", "Stats", "Settings"), tab) { i -> selectTab(i) }
+        val g = GooeyNav(this, mono, fonts, listOf("Focus", "Schedule", "Blocks", "Stats", "Settings"), tab) { i -> selectTab(i) }
         gooey = g
         nav.addView(g, lp(matchP, wrapC))
         rootView.addView(nav, lp(matchP, wrapC))
@@ -2006,7 +2007,7 @@ class MainActivity : Activity() {
         val screenW = resources.displayMetrics.widthPixels
         // Dither Veil: burn through the 1-bit photo with a finger
         val veil = DitherVeil(this, pal.dark, pal.canvas)
-        content.addView(veil, lp(matchP, wrapC))
+        content.addView(veil, lp(matchP, 0, 1f))
         content.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(2), dp(8), dp(22))
@@ -2089,8 +2090,8 @@ class MainActivity : Activity() {
         }
         content.addView(hs, lp(matchP, wrapC))
         content.addView(dots, lp(matchP, wrapC).apply { topMargin = dp(14) })
-        holder.addView(content, FrameLayout.LayoutParams(matchP, wrapC))
-        host.addView(holder, FrameLayout.LayoutParams(matchP, wrapC))
+        holder.addView(content, FrameLayout.LayoutParams(matchP, matchP))
+        host.addView(holder, FrameLayout.LayoutParams(matchP, matchP))
     }
 
     private fun showScheduleSheet(existing: Store.FocusSchedule?) {
