@@ -1278,9 +1278,9 @@ class MainActivity : Activity() {
         runWrap.addView(SoftClouds(this, pal.dark), FrameLayout.LayoutParams(matchP, matchP))
         runWrap.addView(run, FrameLayout.LayoutParams(matchP, wrapC))
         // one quiet Orange lives in the card's top-right corner for the whole session (not tappable)
-        calmOrange = OrangeView(this, fonts, pal.dark, 60f).apply { interactive = false; isClickable = false; visibility = View.GONE }
+        calmOrange = OrangeView(this, fonts, pal.dark, 52f).apply { interactive = false; isClickable = false; visibility = View.GONE }
         runWrap.addView(calmOrange, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.TOP or Gravity.END).apply {
-            topMargin = dp(-34); marginEnd = dp(-34)
+            topMargin = dp(-25); marginEnd = dp(-35)
         })
         runningCard = runWrap
         col.addView(runWrap, lp(matchP, wrapC).apply { topMargin = dp(18) })
@@ -1458,7 +1458,7 @@ class MainActivity : Activity() {
             calmOrange?.let { c ->
                 if (c.visibility != View.VISIBLE) {
                     c.visibility = View.VISIBLE
-                    c.pivotX = dp(81).toFloat(); c.pivotY = dp(101).toFloat()
+                    c.pivotX = dp(70).toFloat(); c.pivotY = dp(88).toFloat()
                     c.scaleX = 0.2f; c.scaleY = 0.2f; c.alpha = 0f
                     c.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(260).setDuration(620)
                         .setInterpolator(SpringInterpolator(13f, 0.55f, 0.7f)).start()
