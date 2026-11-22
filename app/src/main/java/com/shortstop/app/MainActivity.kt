@@ -269,12 +269,12 @@ class MainActivity : Activity() {
     private var tourView: View? = null
 
     /** A short guest appearance: he drops in, reacts, says one line and leaves. Never blocks touches. */
-    private fun orangeSay(move: Move, line: String, top: Boolean, ms: Long) {
+    private fun orangeSay(move: Move, line: String, top: Boolean, ms: Long, y: Int = 64) {
         val root = window.decorView as ViewGroup
         val v = OrangeView(this, fonts, pal.dark, 84f)
         v.interactive = false
         root.addView(v, FrameLayout.LayoutParams(wrapC, wrapC, (if (top) Gravity.TOP else Gravity.BOTTOM) or Gravity.CENTER_HORIZONTAL).apply {
-            if (top) topMargin = dp(64) else bottomMargin = dp(110)
+            if (top) topMargin = dp(y) else bottomMargin = dp(110)
         })
         v.postDelayed({ v.say(line); if (move != Move.ENTER) v.play(move, 1f, true) }, if (move == Move.ENTER) 500L else 900L)
         v.postDelayed({ v.say(null); v.play(Move.EXIT) }, ms + 900L)
@@ -1277,6 +1277,11 @@ class MainActivity : Activity() {
         }
         runWrap.addView(SoftClouds(this, pal.dark), FrameLayout.LayoutParams(matchP, matchP))
         runWrap.addView(run, FrameLayout.LayoutParams(matchP, wrapC))
+        // one quiet Orange lives in the card's top-right corner for the whole session (not tappable)
+        calmOrange = OrangeView(this, fonts, pal.dark, 60f).apply { interactive = false; isClickable = false; visibility = View.GONE }
+        runWrap.addView(calmOrange, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.TOP or Gravity.END).apply {
+            topMargin = dp(-34); marginEnd = dp(-34)
+        })
         runningCard = runWrap
         col.addView(runWrap, lp(matchP, wrapC).apply { topMargin = dp(18) })
 
@@ -1325,9 +1330,6 @@ class MainActivity : Activity() {
         }
         exApps = kv("Focus apps"); exHome = kv("Home screen"); exMode = kv("Mode")
         extras.addView(blocking, lp(matchP, wrapC).apply { topMargin = dp(12) })
-        // a quiet Orange keeps you company: slow breathing, soft blinks, no particles, not tappable
-        calmOrange = OrangeView(this, fonts, pal.dark, 84f).apply { interactive = false }
-        extras.addView(calmOrange, lp(wrapC, wrapC).apply { topMargin = dp(10); gravity = Gravity.CENTER_HORIZONTAL })
         val remind = Store.message(this)
         if (remind.isNotBlank()) {
             val rc = card().apply {
@@ -1388,7 +1390,6 @@ class MainActivity : Activity() {
             Store.endBreak(this)
         } else if (Store.startBreak(this)) {
             toast("Break started. Blocks return when it ends.")
-            orangeSay(Move.BREAK, "Breathe. Back soon.", true, 1300L)
         }
         updateRunning()
     }
@@ -1454,11 +1455,21 @@ class MainActivity : Activity() {
                 b.alpha = if (Store.frozen(this)) 0.5f else 1f
             }
             runLattice?.running = !onBreak
+            calmOrange?.let { c ->
+                if (c.visibility != View.VISIBLE) {
+                    c.visibility = View.VISIBLE
+                    c.pivotX = dp(81).toFloat(); c.pivotY = dp(101).toFloat()
+                    c.scaleX = 0.2f; c.scaleY = 0.2f; c.alpha = 0f
+                    c.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(260).setDuration(620)
+                        .setInterpolator(SpringInterpolator(13f, 0.55f, 0.7f)).start()
+                }
+            }
             if (calmBreak != onBreak) { calmBreak = onBreak; calmOrange?.play(if (onBreak) Move.BREAK else Move.FOCUS, 1f, true) }
             runLabel?.text = if (onBreak) "On break" else "Focusing"
             runElapsed?.text = clock(now - start)
         } else {
             calmBreak = null
+            calmOrange?.let { it.animate().cancel(); it.visibility = View.GONE }
             runEndBtn?.reset()
             runRing?.stop()
         }
@@ -1474,7 +1485,7 @@ class MainActivity : Activity() {
         val todayNow = Store.focusMinutesAgo(this, 0)
         val goalHit = last.done && goalNow > 0 && todayNow >= goalNow && todayNow - last.minutes < goalNow
         orangeSay(if (last.done) Move.CHEER else Move.OOPS,
-            if (goalHit) "Daily goal done!" else if (last.done) "Nice focus!" else "Next one counts.", true, 1700L)
+            if (goalHit) "Daily goal done!" else if (last.done) "Nice focus!" else "Next one counts.", true, 1700L, 170)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(4)) }
         val tag = last.tag.ifEmpty { "Focus" }
         val streak = Store.streak(this)
@@ -1889,7 +1900,6 @@ class MainActivity : Activity() {
             closeSheet()
             wasRunning = true
             updateRunning()
-            orangeSay(Move.FOCUS, "Let's focus.", true, 1300L)
         }
         tint()
         box.addView(slide, lp(matchP, wrapC).apply { topMargin = dp(16); bottomMargin = dp(4); gravity = Gravity.CENTER_HORIZONTAL })
