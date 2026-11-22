@@ -103,8 +103,11 @@ class OrangeView(
     private var winVisible = true
 
     // ---- pose (targets set by pose(), then smoothed)
+    // pose() produces targets; the renderer eases into them so changing states never snaps the body.
     private var dy = 0f; private var sx = 1f; private var sy = 1f; private var rot = 0f; private var lag = 0f
     private var armL = 0f; private var armR = 0f
+    private var drawDy = 0f; private var drawSx = 1f; private var drawSy = 1f
+    private var drawRot = 0f; private var drawLag = 0f; private var drawArmL = 0f; private var drawArmR = 0f
     private var eyeOpenT = 1f; private var happyT = 0f; private var pupilT = 1f
     private var lookXT = 0f; private var lookYT = 0f
     private var mouthMode = 0; private var mouthYT = 1f
@@ -188,6 +191,7 @@ class OrangeView(
     fun play(m: Move, dir: Float = 1f, force: Boolean = false) {
         // a one-shot that is still running is not interrupted by something less important
         if (!force && busy && m != Move.EXIT && prio(m) < prio(move)) return
+        if (m != Move.IDLE) { loopMoves = null; loopIdx = 0; nextAt = 0L }
         move = m; pointDir = if (dir >= 0f) 1f else -1f
         t0 = SystemClock.uptimeMillis(); busy = true
         invalidate()
@@ -242,9 +246,12 @@ class OrangeView(
                 return t < 2.1f
             }
             Move.EXIT -> {
-                val p = (t / 0.35f).coerceIn(0f, 1f)
-                dy = -p * p * s * 1.5f
-                return t < 0.4f
+                // A short, soft lift; opacity is eased separately in onDraw so every layer fades together.
+                val p = sm((t / 0.42f).coerceIn(0f, 1f))
+                dy = -p * s * 0.92f
+                sx = 1f - 0.045f * p
+                sy = 1f - 0.035f * p
+                return t < 0.44f
             }
             Move.HOP -> {
                 val h = s * 0.26f * amp
@@ -401,6 +408,17 @@ class OrangeView(
 
     /** Eases the face parameters, steps the leaf spring, and runs the blink and glance timers. */
     private fun update(now: Long, dt: Float) {
+        // Critically-damped-feeling exponential follow: body, face and leaf settle together.
+        // A slightly quicker response for translation keeps taps crisp; scale/rotation stay buttery.
+        val bodyA = 1f - exp(-(if (calm) 10.5f else 17.5f) * dt).toFloat()
+        val shapeA = 1f - exp(-(if (calm) 9.0f else 14.0f) * dt).toFloat()
+        drawDy += (dy - drawDy) * bodyA
+        drawSx += (sx - drawSx) * shapeA
+        drawSy += (sy - drawSy) * shapeA
+        drawRot += (rot - drawRot) * bodyA
+        drawLag += (lag - drawLag) * bodyA
+        drawArmL += (armL - drawArmL) * shapeA
+        drawArmR += (armR - drawArmR) * shapeA
         val a = 1f - exp(-14.0 * dt).toFloat()
         eyeOpen += (eyeOpenT - eyeOpen) * a
         happy += (happyT - happy) * (1f - exp(-22.0 * dt).toFloat())
@@ -430,8 +448,8 @@ class OrangeView(
         }
 
         // leaf: a spring that is pushed by the body's vertical speed and sway, so it follows through
-        val vy = if (dt > 0f) (dy - prevDy) / dt / s else 0f          // body heights per second
-        val vr = if (dt > 0f) (rot - prevRot) / dt else 0f            // degrees per second
+        val vy = if (dt > 0f) (drawDy - prevDy) / dt / s else 0f    // rendered body heights per second
+        val vr = if (dt > 0f) (drawRot - prevRot) / dt else 0f       // rendered degrees per second
         prevDy = dy; prevRot = rot
         val drive = (-vy * 5.5f - vr * 0.055f + leafKick * 3.0f * sin(now / 90.0).toFloat()) * amp
         val target = leafBias + drive.coerceIn(-14f, 14f) + 0.9f * sin(now / 1400.0).toFloat() * (if (calm) 0.5f else 1f)
@@ -458,11 +476,11 @@ class OrangeView(
         val x = mLeft + px * k; val y = mTop + py * k
         val v = py / 640f
         val w = (1f - v) * (1f - v)
-        var ox = cx + (x - cx) * sx + lag * s * w
-        var oy = feet - (feet - y) * sy
-        if (withArms && (armL > 0.002f || armR > 0.002f)) {
-            val gl = armW(px, py, 100f, 470f) * armL
-            val gr = armW(px, py, 560f, 448f) * armR
+        var ox = cx + (x - cx) * drawSx + drawLag * s * w
+        var oy = feet - (feet - y) * drawSy
+        if (withArms && (drawArmL > 0.002f || drawArmR > 0.002f)) {
+            val gl = armW(px, py, 100f, 470f) * drawArmL
+            val gr = armW(px, py, 560f, 448f) * drawArmR
             oy -= s * 0.10f * (gl + gr)
             ox += s * 0.05f * (gr - gl)
         }
@@ -484,12 +502,12 @@ class OrangeView(
         c.translate(tx, ty)
         if (happy > 0.5f || eyeOpen * bl < 0.2f) {
             // closed eye: a soft arc (happy = upward, blink/sleepy = downward)
-            c.scale(k * sx, k * sy)
+            c.scale(k * drawSx, k * drawSy)
             val w = white.bmp.width * 0.55f; val h = white.bmp.height * 0.2f
             if (happy > 0.5f) { rect.set(-w / 2f, -h * 0.2f, w / 2f, h * 1.8f); c.drawArc(rect, 200f, 140f, false, lid) }
             else { rect.set(-w / 2f, -h * 1.5f, w / 2f, h * 0.5f); c.drawArc(rect, 20f, 140f, false, lid) }
         } else {
-            c.scale(k * sx, k * sy * (eyeOpen * bl).coerceIn(0.05f, 1.15f))
+            c.scale(k * drawSx, k * drawSy * (eyeOpen * bl).coerceIn(0.05f, 1.15f))
             c.drawBitmap(white.bmp, white.x - e[0], white.y - e[1], paint)
             val gx = lookX * 20f; val gy = lookY * 13f
             // pupil
@@ -512,7 +530,7 @@ class OrangeView(
         map(OrangeArt.mouthCx, OrangeArt.mouthCy, false)
         c.save()
         c.translate(tx, ty)
-        c.scale(k * sx, k * sy)
+        c.scale(k * drawSx, k * drawSy)
         if (mouthMode == 1) {
             rect.set(-34f, -30f, 34f, 14f)
             c.drawArc(rect, 25f, 130f, false, lipP)
@@ -542,6 +560,15 @@ class OrangeView(
         }
         update(now, dt)
 
+        // Fade the complete character (including face, leaf, effects and speech) as one composition.
+        // This avoids individual layers popping out at different times.
+        val transition = when (move) {
+            Move.ENTER -> sm(((now - t0) / (420f / spd)).coerceIn(0f, 1f))
+            Move.EXIT -> 1f - sm(((now - t0) / (440f / spd)).coerceIn(0f, 1f))
+            else -> 1f
+        }
+        val layerSave = c.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(), (255f * transition).toInt().coerceIn(0, 255))
+
         val lm = loopMoves
         if (lm != null && move == Move.IDLE && now >= nextAt && lm.isNotEmpty()) {
             val m = lm[loopIdx % lm.size]; loopIdx++
@@ -550,15 +577,15 @@ class OrangeView(
         }
 
         // ground shadow, smaller when he is in the air
-        val air = (dy / (s * 0.5f)).coerceIn(0f, 1f)
+        val air = (drawDy / (s * 0.5f)).coerceIn(0f, 1f)
         shadow.color = Color.argb((46 * (1f - 0.6f * air)).toInt(), 90, 40, 10)
         val sw = s * 0.36f * (1f - 0.25f * air)
         rect.set(cx - sw, feet - s * 0.03f, cx + sw, feet + s * 0.05f)
         if (move != Move.ENTER && move != Move.EXIT) c.drawOval(rect, shadow)
 
         c.save()
-        c.translate(0f, -dy)
-        c.rotate(rot, cx, feet)
+        c.translate(0f, -drawDy)
+        c.rotate(drawRot, cx, feet)
 
         // body mesh
         var i = 0
@@ -581,7 +608,7 @@ class OrangeView(
             c.save()
             c.translate(tx, ty)
             c.rotate(leafA)
-            c.scale(k * sx, k * sy)
+            c.scale(k * drawSx, k * drawSy)
             c.drawBitmap(leaf.bmp, leaf.x - OrangeArt.leafPx, leaf.y - OrangeArt.leafPy, paint)
             c.restore()
         }
@@ -648,9 +675,14 @@ class OrangeView(
             c.restore()
         }
 
+        c.restoreToCount(layerSave)
+
         // schedule the next frame: full speed only while something is actually moving
         if (attached && winVisible && isShown) {
-            val moving = busy || blinkStart != 0L || abs(leafV) > 0.4f || abs(leafA - leafBias) > 0.15f || lm != null
+            val poseSettling = abs(drawDy - dy) > 0.015f || abs(drawRot - rot) > 0.08f ||
+                abs(drawSx - sx) > 0.0015f || abs(drawSy - sy) > 0.0015f ||
+                abs(drawLag - lag) > 0.0015f || abs(drawArmL - armL) > 0.002f || abs(drawArmR - armR) > 0.002f
+            val moving = busy || poseSettling || blinkStart != 0L || abs(leafV) > 0.4f || abs(leafA - leafBias) > 0.15f || lm != null
             if (moving) postInvalidateOnAnimation() else postInvalidateDelayed(40)
         }
     }

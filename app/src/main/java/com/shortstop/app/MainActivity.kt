@@ -291,18 +291,21 @@ class MainActivity : Activity() {
             bottomMargin = dp(150); leftMargin = dp(6)
         })
         nudge = v
-        v.say("Tap to focus!")
-        v.loop(listOf(Move.HOP, Move.NOD, Move.HOP, Move.WAVE), 1200L)
+        v.say("Ready when you are.")
+        // A single soft acknowledgement; no looping dance and no persistent speech bubble.
+        v.play(Move.NOD, force = true)
         v.setOnClickListener { dismissNudge(); showStartSheet() }
-        v.postDelayed({ if (nudge === v) dismissNudge() }, 9000L)
+        v.contentDescription = "Orange mascot. Tap to start a focus session."
+        v.postDelayed({ if (nudge === v) v.say(null) }, 3600L)
+        v.postDelayed({ if (nudge === v) dismissNudge() }, 5600L)
     }
 
     private fun dismissNudge() {
         val v = nudge ?: return
         nudge = null
         v.say(null)
-        v.play(Move.EXIT)
-        v.postDelayed({ (v.parent as? ViewGroup)?.removeView(v) }, 500L)
+        v.play(Move.EXIT, force = true)
+        v.postDelayed({ (v.parent as? ViewGroup)?.removeView(v) }, 520L)
     }
 
     private fun showTour() {
@@ -2164,7 +2167,8 @@ class MainActivity : Activity() {
         content.gravity = Gravity.CENTER_VERTICAL
         val orange = OrangeView(this, fonts, pal.dark, 92f)
         orange.say("Tap + to add!")
-        orange.loop(listOf(Move.HOP, Move.NOD, Move.WAVE, Move.HOP), 1500L)
+        // A single subtle acknowledgement; no endless animation loop in an empty state.
+        orange.play(Move.NOD, force = true)
         content.addView(orange, lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL })
         content.addView(display("Create your\nstudy schedule", 22f).apply {
             gravity = Gravity.CENTER
