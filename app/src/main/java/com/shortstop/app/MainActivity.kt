@@ -1604,6 +1604,8 @@ class MainActivity : Activity() {
                 } else if (calmBreak != onBreak) {
                     calmBreak = onBreak
                     playBreakCompanionTransition(onBreak)
+                } else {
+                    Unit
                 }
             }
             runLabel?.text = if (onBreak) "On break" else "Focusing"
