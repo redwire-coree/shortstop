@@ -86,6 +86,7 @@ class MainActivity : Activity() {
     private var companion: FrameLayout? = null
     private var companionOrange: OrangeView? = null
     private var companionSub: TextView? = null
+    private var companionMessageToken = 0
     private val sleepRun = Runnable {
         if (tab == 0 && tourView == null && !Store.focusRunning(this)) companionOrange?.play(Move.SLEEP)
     }
@@ -244,7 +245,7 @@ class MainActivity : Activity() {
             if (!Store.focusRunning(this) && tourView == null && System.currentTimeMillis() - p.getLong("greet_at", 0L) > 6 * 3600_000L) {
                 p.edit().putLong("greet_at", System.currentTimeMillis()).apply()
                 val c = companionOrange
-                if (c != null && tab == 0) { c.say("Hi, welcome back!"); c.play(Move.WAVE, 1f, true); c.postDelayed({ c.say(null) }, 2400L) }
+                if (c != null && tab == 0) { companionMessage("Hi, welcome back!", 2400L); c.play(Move.WAVE, 1f, true) }
                 else orangeSay(Move.ENTER, "Hi, welcome back!", false, 1700L)
             }
         }, 1500L)
@@ -295,6 +296,23 @@ class MainActivity : Activity() {
         c.postDelayed(sleepRun, 75_000L)
     }
 
+    /** Keep companion dialogue in the measured text column, never inside the mascot canvas. */
+    private fun companionMessage(line: String, durationMs: Long = 3200L) {
+        val sub = companionSub ?: return
+        companionMessageToken += 1
+        val token = companionMessageToken
+        sub.text = line
+        sub.maxLines = 2
+        sub.ellipsize = android.text.TextUtils.TruncateAt.END
+        sub.animate().cancel()
+        sub.alpha = 0f
+        sub.translationY = dp(4).toFloat()
+        sub.animate().alpha(1f).translationY(0f).setDuration(180L).start()
+        sub.postDelayed({
+            if (token == companionMessageToken && sub.isAttachedToWindow) refreshCompanion()
+        }, durationMs)
+    }
+
     private fun refreshCompanion() {
         val comp = companion ?: return
         val running = Store.focusRunning(this)
@@ -303,17 +321,17 @@ class MainActivity : Activity() {
         val today = Store.focusMinutesAgo(this, 0)
         val goal = Store.goalMin(this)
         val goalMet = goal > 0 && today >= goal
-        val line = if (goalMet) "Daily goal done. So proud of you!"
-            else if (today > 0) "${fmtMin(today)} focused today. Keep it up."
-            else "Ready when you are. Tap me, or start a session."
+        val line = if (goalMet) "Daily goal reached. Nicely done."
+            else if (today > 0) "${fmtMin(today)} of focus today."
+            else "Ready when you are."
         companionSub?.let { if (it.text.toString() != line) it.text = line }
         val p = Store.prefs(this)
         val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
         if (goalMet && tab == 0 && p.getString("proud_day", "") != day) {
             p.edit().putString("proud_day", day).apply()
-            companionOrange?.say("Goal reached!")
+            companionMessage("Daily goal reached. Nicely done.")
             companionOrange?.play(Move.PROUD, 1f, true)
-            companionOrange?.postDelayed({ companionOrange?.say(null) }, 2600L)
+            companionOrange?.postDelayed({ if (companionOrange?.isAttachedToWindow == true) refreshCompanion() }, 2600L)
         }
     }
 
@@ -327,7 +345,7 @@ class MainActivity : Activity() {
             bottomMargin = dp(150); leftMargin = dp(6)
         })
         nudge = v
-        v.say("A little focus time?")
+        v.say("Ready for a focused session?")
         v.play(Move.ENCOURAGE, force = true)
         v.setOnClickListener { dismissNudge(); showStartSheet() }
         v.postDelayed({ if (nudge === v) dismissNudge() }, 9000L)
@@ -1264,7 +1282,7 @@ class MainActivity : Activity() {
 
         // Orange lives here on the idle Focus screen: breathing, blinking, glancing, reacting to taps, dozing off when left alone
         val comp = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
-        val co = OrangeView(this, fonts, pal.dark, 56f)
+        val co = OrangeView(this, fonts, pal.dark, 64f)
         co.setOnClickListener { scheduleSleep() }
         // OrangeView reserves a wide canvas for its optional speech bubble. Its actual
         // character is drawn near the left edge; a negative host margin clipped half of him.
@@ -1275,9 +1293,9 @@ class MainActivity : Activity() {
         val cs = tv("", 13f, fonts.regular, FocusTheme.muted(pal.dark)).apply { setPadding(0, dp(2), 0, 0) }
         ct.addView(cs, lp(wrapC, wrapC))
         ct.setOnClickListener { if (!Store.focusRunning(this)) showStartSheet() }
-        comp.addView(ct, FrameLayout.LayoutParams(matchP, wrapC, Gravity.CENTER_VERTICAL).apply { marginStart = dp(72) })
+        comp.addView(ct, FrameLayout.LayoutParams(matchP, wrapC, Gravity.CENTER_VERTICAL).apply { marginStart = dp(84) })
         companion = comp; companionOrange = co; companionSub = cs
-        col.addView(comp, lp(matchP, dp(92)).apply { topMargin = dp(10) })
+        col.addView(comp, lp(matchP, dp(104)).apply { topMargin = dp(10) })
 
         // Running session
         val run = LinearLayout(this).apply {
@@ -1449,16 +1467,41 @@ class MainActivity : Activity() {
     }
 
     private fun onBreakClick() {
-        val overload = !Store.onBreak(this) && Store.breaksLeft(this) <= 1
-        if (Store.onBreak(this)) {
+        val wasOnBreak = Store.onBreak(this)
+        val changed = if (wasOnBreak) {
             Store.endBreak(this)
-        } else if (Store.startBreak(this)) {
-            toast("Break started. Blocks return when it ends.")
+            true
+        } else {
+            val started = Store.startBreak(this)
+            if (started) toast("Break started. Take a moment to recharge.")
+            started
         }
+        if (!changed) {
+            if (!wasOnBreak && Store.breaksLeft(this) <= 0) toast("No breaks remaining in this session.")
+            return
+        }
+
+        // updateRunning owns the single source of truth for the visual state transition.
+        // The same path is used when a break expires automatically.
         updateRunning()
-        if (overload) calmOrange?.let { c ->
-            c.play(Move.OVERLOAD, 1f, true)
-            c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.FOCUS, 1f, true) }, 3200L)
+    }
+
+    private fun playBreakCompanionTransition(onBreak: Boolean) {
+        val orange = calmOrange ?: return
+        orange.animate().cancel()
+        if (onBreak) {
+            orange.removeCallbacks(sleepRun)
+            orange.play(Move.SLEEP, 1f, true)
+            orange.say("Taking a little rest.")
+        } else {
+            orange.play(Move.SURPRISE, 1f, true)
+            orange.say("Ready when you are.")
+            orange.postDelayed({
+                if (orange.isAttachedToWindow && Store.focusRunning(this) && !Store.onBreak(this)) {
+                    orange.play(Move.FOCUS, 1f, true)
+                    orange.say(null)
+                }
+            }, 1050L)
         }
     }
 
@@ -1469,9 +1512,9 @@ class MainActivity : Activity() {
         val oldDay = prefs.getString("orange_quit_day", "")
         val count = if (oldDay == day) prefs.getInt("orange_quit_count", 0) + 1 else 1
         prefs.edit().putString("orange_quit_day", day).putInt("orange_quit_count", count).apply()
-        c.say(if (count >= 3) "Please don't give up on me!" else "Wait! One more minute?")
+        companionMessage(if (count >= 3) "Want to pause, or try one more minute?" else "One more minute, or finish here?")
         c.play(if (count >= 3) Move.DEAD else Move.BEGGING, 1f, true)
-        c.postDelayed({ c.say(null); if (c.isAttachedToWindow) c.play(Move.IDLE, 1f, true) }, 4200L)
+        c.postDelayed({ if (c.isAttachedToWindow) c.play(Move.IDLE, 1f, true) }, 4200L)
     }
 
     private fun onEndClick() {
@@ -1549,8 +1592,10 @@ class MainActivity : Activity() {
                     c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.FOCUS, 1f, true) }, 4650L)
                 }
             }
-            if (calmBreak == null) calmBreak = onBreak
-            else if (calmBreak != onBreak) { calmBreak = onBreak; calmOrange?.play(if (onBreak) Move.BREAK else Move.FOCUS, 1f, true) }
+            if (calmBreak == null || calmBreak != onBreak) {
+                calmBreak = onBreak
+                playBreakCompanionTransition(onBreak)
+            }
             runLabel?.text = if (onBreak) "On break" else "Focusing"
             runElapsed?.text = clock(now - start)
         } else {
@@ -1581,8 +1626,8 @@ class MainActivity : Activity() {
                 last.minutes >= 45 -> Move.FINAL_BOSS
                 else -> Move.BEGGING
             }
-            c.say(msg); c.play(reaction, 1f, true)
-            c.postDelayed({ c.say(null); if (c.isAttachedToWindow) c.play(Move.IDLE, 1f, true) }, 4200L)
+            companionMessage(msg); c.play(reaction, 1f, true)
+            c.postDelayed({ if (c.isAttachedToWindow) c.play(Move.IDLE, 1f, true) }, 4200L)
             scheduleSleep()
         } else orangeSay(if (last.done) Move.CELEBRATE else Move.OOPS, msg, true, 1700L, 170)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(4)) }
@@ -1593,7 +1638,7 @@ class MainActivity : Activity() {
             last.minutes < 25 -> "A clean sprint."
             last.minutes < 45 -> "Real focus."
             last.minutes < 90 -> "Deep work. Well done."
-            last.minutes < 180 -> "Serious focus. Be proud."
+            last.minutes < 180 -> "A solid session. Well done."
             last.minutes < 300 -> "Marathon focus. Rare."
             else -> "Hours of pure focus. Unreal."
         }
@@ -2263,7 +2308,7 @@ class MainActivity : Activity() {
         // Dither Veil: burn through the 1-bit photo with a finger
         content.gravity = Gravity.CENTER_VERTICAL
         val orange = OrangeView(this, fonts, pal.dark, 92f)
-        orange.say("Ready when you are!")
+        orange.say("Your next focus session is ready.")
         orange.play(Move.LISTEN, force = true)
         content.addView(orange, lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL })
         content.addView(display("Create your\nstudy schedule", 22f).apply {

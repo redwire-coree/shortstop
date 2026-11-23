@@ -388,7 +388,7 @@ object Store {
             .putLong("f_start", now).putLong("f_end", end).putInt("f_min", minutes)
             .putString("f_tag", tag).putBoolean("f_strict", strict)
             .putInt("f_bleft", breaks).putInt("f_blen", breakMin)
-            .putLong("f_bu", 0L).putLong("f_bt", 0L)
+            .putLong("f_bu", 0L).putLong("f_bs", 0L).putLong("f_bt", 0L)
             .putLong("lock_until", if (strict) end else 0L)
             .apply()
         rememberSession(c, minutes, tag, breaks, breakMin)
@@ -402,6 +402,7 @@ object Store {
         val e = p(c).edit()
             .putInt("f_bleft", breaksLeft(c) - 1)
             .putLong("f_bu", now + ms)
+            .putLong("f_bs", now)
             .putLong("f_end", newEnd)
             .putLong("f_bt", breakTotalMs(c) + ms)
         if (focusStrict(c)) e.putLong("lock_until", newEnd)
@@ -409,7 +410,29 @@ object Store {
         return true
     }
 
-    fun endBreak(c: Context) = p(c).edit().putLong("f_bu", 0L).apply()
+    /** End a break early without charging the unused portion to the focus timer or break accounting.
+     * Older active sessions without f_bs are migrated using their stored break deadline and configured duration.
+     */
+    fun endBreak(c: Context) {
+        val sp = p(c)
+        val now = System.currentTimeMillis()
+        val until = sp.getLong("f_bu", 0L)
+        if (until <= 0L) return
+        val plannedBreakMs = sp.getInt("f_blen", 5).coerceAtLeast(1) * 60_000L
+        val remaining = (until - now).coerceIn(0L, plannedBreakMs)
+        val currentEnd = sp.getLong("f_end", 0L)
+        val currentBreakTotal = sp.getLong("f_bt", 0L)
+        val edit = sp.edit()
+            .putLong("f_bu", 0L)
+            .putLong("f_bs", 0L)
+            .putLong("f_end", (currentEnd - remaining).coerceAtLeast(now))
+            .putLong("f_bt", (currentBreakTotal - remaining).coerceAtLeast(0L))
+        if (sp.getBoolean("f_strict", false)) {
+            val lockEnd = sp.getLong("lock_until", currentEnd)
+            edit.putLong("lock_until", (lockEnd - remaining).coerceAtLeast(now))
+        }
+        edit.apply()
+    }
 
     fun isKnownApp(pkg: String) = PACKAGES.containsKey(pkg)
 
@@ -431,7 +454,7 @@ object Store {
     }
 
     private fun clearFocus(c: Context) {
-        p(c).edit().putLong("f_end", 0L).putLong("f_start", 0L).putLong("f_bu", 0L).putLong("lock_until", 0L).apply()
+        p(c).edit().putLong("f_end", 0L).putLong("f_start", 0L).putLong("f_bu", 0L).putLong("f_bs", 0L).putLong("lock_until", 0L).apply()
     }
 
     private fun recordSession(c: Context, completed: Boolean) {

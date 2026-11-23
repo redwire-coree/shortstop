@@ -100,6 +100,9 @@ class OrangeView(
     private var lastTap = 0L
     private var tapRun = 0
     private var longFired = false
+    // A deliberate 4.5-second hold unlocks a quiet, theme-aware magic flourish.
+    private var magicAt = 0L
+    private var holdStartedAt = 0L
     // Petting is an overlay reaction: it never replaces the active focus/break animation.
     private var petAt = 0L
     private var petSide = 1f
@@ -107,6 +110,9 @@ class OrangeView(
     // A tactile press is a separate, reversible squash overlay; it never changes the active move.
     private var touchHeld = false
     private var touchSquash = 0f
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var lastDragX = 0f
     private var attached = false
     private var winVisible = true
 
@@ -153,7 +159,22 @@ class OrangeView(
     }
     private val rect = RectF()
     private val scenarioFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val magicGlow = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val magicDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val magicRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    // Articulated foreground limbs: independent shoulder/elbow/wrist motion layered over the
+    // original orange body. The base illustration remains untouched.
+    private val limbOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+        color = 0xFFCE5B12.toInt()
+    }
+    private val limbFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+        color = 0xFFFFA13A.toInt()
+    }
+    private val handFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFB04B.toInt() }
     private val scenarioStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val sleepText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create("sans-serif-rounded", Typeface.BOLD); textAlign = Paint.Align.CENTER }
     private val gridC = 14; private val gridR = 12
     private val verts = FloatArray((gridC + 1) * (gridR + 1) * 2)
     private val enterSpring = SpringInterpolator(14f, 0.5f, 0.9f)
@@ -181,8 +202,15 @@ class OrangeView(
     private val tail = Path()
 
     private val longPress = Runnable {
-        if (interactive && (move == Move.FOCUS || move == Move.BREAK)) { longFired = true; petAt = SystemClock.uptimeMillis(); petStrength = 1f; performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); invalidate() }
-        else if (interactive && !busy) { longFired = true; play(Move.SURPRISE) }
+        if (interactive && touchHeld && move != Move.EXIT) {
+            longFired = true
+            val now = SystemClock.uptimeMillis()
+            magicAt = now
+            petAt = now
+            petStrength = 1f
+            performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            invalidate()
+        }
     }
 
     // ---- public API
@@ -396,16 +424,11 @@ class OrangeView(
                 sy += 0.010f * b; sx -= 0.006f * b
                 rot = 0.3f * sin(t * 0.7f)
                 eyeOpenT = 0.84f; mouthMode = 1; lookYT = 0.05f
+                // Tiny asymmetric arm settling keeps the companion alive without distracting
+                // from the timer; wrists continue their own delayed micro-motion in the rig.
+                armL = 0.075f + 0.018f * sin(t * 1.05f)
+                armR = 0.082f + 0.016f * sin(t * 0.92f + 1.1f)
                 blinkQuiet = 0.45f
-                // A short, soft acknowledgement when the user pets Orange during focus.
-                val petAge = if (petAt == 0L) 9f else ((SystemClock.uptimeMillis() - petAt) / 1000f).coerceAtLeast(0f)
-                val pet = if (petAge < 0.90f) sin(Math.PI * (petAge / 0.90f)).toFloat() else 0f
-                dy -= s * 0.035f * pet
-                sx += 0.035f * pet; sy -= 0.045f * pet
-                rot += petSide * 2.2f * pet
-                happyT = max(happyT, pet * 0.85f)
-                lookXT = petSide * 0.24f * pet
-                leafKick = max(leafKick, pet * 0.9f)
                 return true
             }
             Move.BREAK -> {
@@ -413,6 +436,8 @@ class OrangeView(
                 sy = 1f + 0.016f * b; sx = 1f - 0.009f * b
                 rot = 0.8f * sin(t * 0.6f)
                 eyeOpenT = 0.62f; mouthMode = 1; leafBiasT = -7f
+                armL = 0.10f + 0.025f * sin(t * 0.8f)
+                armR = 0.11f + 0.022f * sin(t * 0.72f + 0.8f)
                 blinkQuiet = 0.6f
                 return true
             }
@@ -470,8 +495,8 @@ class OrangeView(
                 val breath = sin(t * 1.05f)
                 sy = 1f + 0.018f * breath; sx = 1f - 0.010f * breath
                 rot = 1.2f + 0.7f * sin(t * 0.48f)
-                eyeOpenT = 0.34f; mouthMode = 1; lookYT = 0.28f
-                leafBiasT = -10f; blinkQuiet = 0.42f
+                eyeOpenT = 0.07f; mouthMode = 1; lookYT = 0.28f
+                leafBiasT = -10f; blinkQuiet = 0.12f
                 return true
             }
             Move.PROUD -> {
@@ -573,6 +598,8 @@ class OrangeView(
                 val b = sin(t * 1.85f)   // ~3.4 s breath
                 sy = 1f + 0.014f * b; sx = 1f - 0.008f * b
                 rot = 0.5f * sin(t * 0.95f)
+                armL = 0.055f + 0.012f * sin(t * 0.9f)
+                armR = 0.060f + 0.010f * sin(t * 0.82f + 1.0f)
                 return true
             }
         }
@@ -661,6 +688,136 @@ class OrangeView(
     private fun armW(px: Float, py: Float, ax: Float, ay: Float): Float {
         val a = px - ax; val b = py - ay
         return exp(-(a * a + b * b) / (2f * 78f * 78f))
+    }
+
+    /** Draws independently articulated arms and hands in mascot source coordinates.
+     * Curved upper/lower segments use separate joints, so gestures read as character acting
+     * instead of the whole orange being warped to imitate a wave. */
+    private fun drawArticulatedArms(c: Canvas, now: Long) {
+        if (armL < 0.045f && armR < 0.045f) return
+        val time = (now - t0) / 1000f
+        c.save()
+        c.translate(mLeft, mTop)
+        c.scale(k, k)
+        // Secondary joints are animated independently from the shoulder target. The small
+        // stagger creates overlap/follow-through: elbow leads, wrist trails, fingers settle last.
+        fun arm(side: Float, amountRaw: Float, phase: Float) {
+            val amount = amountRaw.coerceIn(0f, 1f)
+            if (amount < 0.035f) return
+            val shoulderX = if (side < 0f) 128f else 512f
+            val shoulderY = if (side < 0f) 466f else 452f
+            val beat = time * when (move) {
+                Move.WAVE -> 2.0f * Math.PI.toFloat() * 2.35f
+                Move.PANIC, Move.OVERLOAD -> 2.0f * Math.PI.toFloat() * 2.8f
+                Move.BEGGING -> 2.0f * Math.PI.toFloat() * 1.35f
+                Move.CRYING -> 2.0f * Math.PI.toFloat() * 0.72f
+                else -> 2.0f * Math.PI.toFloat() * 0.82f
+            }
+            val wave = sin(beat + phase)
+            val lagWave = sin(beat + phase - 0.72f)
+            val gesture = when (move) {
+                Move.BEGGING -> 0.16f + 0.10f * wave
+                Move.CRYING -> -0.10f + 0.07f * wave
+                Move.FINAL_BOSS -> 0.18f + 0.025f * wave
+                Move.VICTORY, Move.CHEER, Move.CELEBRATE -> 0.20f + 0.08f * wave
+                Move.PANIC, Move.OVERLOAD -> 0.10f + 0.16f * wave
+                Move.WAVE -> 0.34f * wave
+                Move.DEAD, Move.SLEEP -> -0.08f
+                else -> 0.035f * wave
+            }
+            val lift = (amount * (0.78f + 0.22f * (0.5f + 0.5f * wave))).coerceIn(0f, 1f)
+            val elbowBend = (0.20f + amount * 0.30f + gesture).coerceIn(-0.05f, 0.72f)
+            val elbowX = shoulderX + side * (30f + 36f * lift - 8f * elbowBend)
+            val elbowY = shoulderY - (18f + 70f * lift) + wave * amount * 5f
+            val wristX = shoulderX + side * (54f + 78f * lift - 13f * elbowBend)
+            val wristY = shoulderY - (8f + 139f * lift) + lagWave * amount * 15f + elbowBend * 13f
+            val path = Path().apply {
+                moveTo(shoulderX, shoulderY)
+                cubicTo(shoulderX + side * 18f, shoulderY - 16f - 25f * lift,
+                    elbowX - side * 14f, elbowY + 19f, elbowX, elbowY)
+                cubicTo(elbowX + side * (15f + 8f * elbowBend), elbowY - 12f * lift,
+                    wristX - side * 13f, wristY + 19f + lagWave * 4f, wristX, wristY)
+            }
+            limbOutline.strokeWidth = 38f
+            limbFill.strokeWidth = 27f
+            c.drawPath(path, limbOutline)
+            c.drawPath(path, limbFill)
+            c.save()
+            c.translate(wristX, wristY)
+            val wristAngle = side * (-12f + 9f * wave + 7f * lagWave - amount * 7f)
+            c.rotate(wristAngle)
+            // A slightly different palm silhouette for clenched determination vs open gestures.
+            val fist = move == Move.FINAL_BOSS || move == Move.PANIC || move == Move.OVERLOAD
+            limbOutline.style = Paint.Style.FILL
+            c.drawOval(if (fist) -18f else -20f, -17f, if (fist) 18f else 20f, 18f, limbOutline)
+            c.drawOval(-15f, -14f, 15f, 14f, handFill)
+            limbOutline.style = Paint.Style.STROKE
+            limbOutline.strokeWidth = 7f
+            if (!fist) {
+                val fan = (0.72f + 0.28f * sin(beat + phase - 1.1f)).coerceIn(0.35f, 1f)
+                for (finger in -1..1) {
+                    val fx = finger * 9f
+                    c.drawLine(fx, -8f, fx + finger * 5f * fan, -19f - amount * 7f * fan, limbOutline)
+                }
+            } else {
+                c.drawLine(-7f, -7f, 7f, -7f, limbOutline)
+            }
+            c.restore()
+        }
+        arm(-1f, armL, 0.4f)
+        arm(1f, armR, 1.8f)
+        c.restore()
+    }
+
+    /**
+     * Small articulated feet give the mascot a readable centre of gravity. They are drawn as
+     * separate upper/lower segments with a soft foot roll, rather than deforming the body bitmap.
+     * Motion is deterministic from the active move clock, so loops remain seamless.
+     */
+    private fun drawArticulatedLegs(c: Canvas, now: Long) {
+        val time = (now - t0) / 1000f
+        val idle = move == Move.IDLE || move == Move.FOCUS || move == Move.BREAK || move == Move.THINK
+        val gait = when (move) {
+            Move.HOP, Move.CHEER, Move.VICTORY -> sin(time * 8.2f)
+            Move.PANIC, Move.OVERLOAD -> sin(time * 15f) * 0.72f
+            Move.DEAD, Move.SLEEP -> 0f
+            else -> if (idle) sin(now / 1250f) * 0.16f else sin(time * 6.0f) * 0.28f
+        }
+        val lift = when (move) {
+            Move.HOP, Move.CHEER, Move.VICTORY -> abs(gait) * 0.22f
+            Move.PANIC, Move.OVERLOAD -> abs(gait) * 0.10f
+            Move.DEAD, Move.SLEEP -> 0f
+            else -> 0.025f + abs(gait) * 0.035f
+        }
+        c.save()
+        c.translate(mLeft, mTop)
+        c.scale(k, k)
+        fun leg(side: Float, phase: Float) {
+            val swing = sin(time * (if (move == Move.PANIC || move == Move.OVERLOAD) 15f else 6.0f) + phase) * gait.let { if (it == 0f) 0f else 1f }
+            val hipX = 250f + side * 62f
+            val hipY = 570f
+            val kneeX = hipX + side * (8f + swing * 13f)
+            val kneeY = 606f - lift * 70f
+            val ankleX = hipX + side * (13f + swing * 22f)
+            val ankleY = 630f - lift * 105f
+            val path = Path().apply {
+                moveTo(hipX, hipY)
+                cubicTo(hipX + side * 5f, hipY + 17f, kneeX - side * 7f, kneeY - 8f, kneeX, kneeY)
+                cubicTo(kneeX + side * 8f, kneeY + 10f, ankleX - side * 5f, ankleY - 8f, ankleX, ankleY)
+            }
+            limbOutline.strokeWidth = 31f
+            limbFill.strokeWidth = 22f
+            c.drawPath(path, limbOutline)
+            c.drawPath(path, limbFill)
+            c.save()
+            c.translate(ankleX + side * 8f, ankleY + 2f)
+            c.rotate(side * (swing * 9f - lift * 18f))
+            c.drawOval(-22f, -10f, 24f, 13f, handFill)
+            c.restore()
+        }
+        leg(-1f, 0f)
+        leg(1f, Math.PI.toFloat())
+        c.restore()
     }
 
     private fun drawEye(c: Canvas, i: Int, bl: Float) {
@@ -815,6 +972,20 @@ class OrangeView(
                     c.drawPath(spiral,stroke)
                 }
             }
+            Move.SLEEP -> {
+                // Quiet, continuous sleep cues: staggered Zs drift upward, soften, and
+                // respawn on a fixed cycle so the loop never pops or flickers.
+                for (i in 0..2) {
+                    val p = ((phase * 0.19f + i * 0.34f) % 1f + 1f) % 1f
+                    val x = cx0 + s * (0.23f + i * 0.085f) + sin(phase * 1.1f + i) * s * 0.018f
+                    val y = top + s * (0.16f - p * 0.22f)
+                    sleepText.textSize = s * (0.075f + i * 0.012f)
+                    sleepText.color = if (dark) 0xFFFFC58E.toInt() else 0xFF8B765F.toInt()
+                    sleepText.alpha = (150f * sin(Math.PI * p).toFloat()).toInt().coerceIn(0, 150)
+                    c.drawText("z".repeat(i + 1), x, y, sleepText)
+                }
+                sleepText.alpha = 255
+            }
             Move.VICTORY -> {
                 val crownY = top - s*.015f + s*.018f*sin(phase*3f)
                 val crown = Path().apply { moveTo(cx0-s*.25f,crownY+s*.12f); lineTo(cx0-s*.30f,crownY-s*.05f); lineTo(cx0-s*.13f,crownY+s*.02f); lineTo(cx0,crownY-s*.14f); lineTo(cx0+s*.13f,crownY+s*.02f); lineTo(cx0+s*.30f,crownY-s*.05f); lineTo(cx0+s*.25f,crownY+s*.12f); close() }
@@ -854,6 +1025,19 @@ class OrangeView(
         sy -= 0.055f * pressPulse
         dy += s * 0.012f * pressPulse
         blendPose(now)
+        // A pet is a cross-state additive reaction: it remains visible during idle, focus,
+        // break and scenario performances without replacing their choreography.
+        val petAge = if (petAt == 0L) 2f else ((now - petAt) / 1000f).coerceAtLeast(0f)
+        val petPulse = if (petAge < 0.82f) sin(Math.PI * (petAge / 0.82f)).toFloat() else 0f
+        if (petPulse > 0.001f) {
+            dy -= s * 0.025f * petPulse
+            sx += 0.022f * petPulse
+            sy -= 0.032f * petPulse
+            rot += petSide * 1.8f * petPulse
+            happyT = max(happyT, 0.72f * petPulse)
+            lookXT = petSide * 0.30f * petPulse
+            leafKick = max(leafKick, 0.75f * petPulse)
+        }
         if (!running && move == Move.EXIT) {
             busy = false
         } else if (!running) {
@@ -915,6 +1099,8 @@ class OrangeView(
             }
         }
         c.drawBitmapMesh(base.bmp, gridC, gridR, verts, 0, null, 0, paint)
+        drawArticulatedLegs(c, now)
+        drawArticulatedArms(c, now)
 
         drawMouth(c)
         val bl = blinkFactor(now)
@@ -981,6 +1167,10 @@ class OrangeView(
             c.restore()
         }
 
+        // Long-press magic: a small, soft aurora halo with drifting sprinkles. It is deliberately
+        // restrained and follows the app theme (sage in light mode, warm orange in dark mode).
+        drawLongPressMagic(c, now)
+
         // speech bubble
         val lay = layout
         if (lay != null) {
@@ -1011,13 +1201,58 @@ class OrangeView(
         // schedule the next frame: full speed only while something is actually moving
         if (attached && winVisible && isShown) {
             val petAnimating = petAt != 0L && now - petAt < 950L
-            val ambientLoop = move == Move.FOCUS || move == Move.BREAK || move == Move.IDLE ||
+            val magicAnimating = magicAt != 0L && now - magicAt < 2600L
+            val ambientLoop = move == Move.FOCUS || move == Move.BREAK || move == Move.SLEEP || move == Move.IDLE ||
                 move == Move.BEGGING || move == Move.DEAD || move == Move.PANIC || move == Move.CRYING ||
                 move == Move.FINAL_BOSS || move == Move.OVERLOAD || move == Move.VICTORY
-            val moving = busy || petAnimating || blinkStart != 0L || abs(leafV) > 0.4f ||
+            val moving = busy || petAnimating || magicAnimating || (touchHeld && !longFired) || blinkStart != 0L || abs(leafV) > 0.4f ||
                 abs(leafA - leafBias) > 0.15f || lm != null || ambientLoop
             // Keep character motion on the display frame clock; only static/offscreen states may idle.
             if (moving) postInvalidateOnAnimation() else postInvalidateDelayed(40)
+        }
+    }
+
+    private fun drawLongPressMagic(c: Canvas, now: Long) {
+        if (magicAt == 0L) return
+        val age = (now - magicAt) / 1000f
+        if (age >= 2.6f) { magicAt = 0L; return }
+        val fadeIn = (age / 0.22f).coerceIn(0f, 1f)
+        val fadeOut = (1f - ((age - 1.55f) / 1.05f).coerceIn(0f, 1f))
+        val envelope = (fadeIn * fadeOut).coerceIn(0f, 1f)
+        val color = if (dark) Color.rgb(255, 151, 65) else Color.rgb(112, 174, 124)
+        val centerX = cx
+        val centerY = mTop + s * 0.49f
+        val radius = s * (0.27f + 0.11f * sm((age / 1.2f).coerceIn(0f, 1f)))
+
+        magicGlow.shader = RadialGradient(centerX, centerY, radius * 1.8f,
+            intArrayOf(Color.argb((48 * envelope).toInt(), Color.red(color), Color.green(color), Color.blue(color)),
+                Color.argb((18 * envelope).toInt(), Color.red(color), Color.green(color), Color.blue(color)),
+                Color.TRANSPARENT), floatArrayOf(0f, 0.58f, 1f), Shader.TileMode.CLAMP)
+        c.drawCircle(centerX, centerY, radius * 1.8f, magicGlow)
+        magicGlow.shader = null
+
+        magicRing.color = color
+        magicRing.alpha = (105 * envelope).toInt()
+        magicRing.strokeWidth = 1.35f * d
+        val ringRadius = radius * (0.92f + 0.12f * sin(age * 2.1f))
+        c.drawCircle(centerX, centerY, ringRadius, magicRing)
+
+        // Deterministic orbital particles: no per-frame allocations or random flicker.
+        for (i in 0 until 14) {
+            val phase = i * (Math.PI * 2.0 / 14.0) + age * (0.72 + (i % 3) * 0.12)
+            val travel = (age * (0.30 + (i % 4) * 0.045) + i * 0.071) % 1.0
+            val orbit = radius * (0.72f + travel.toFloat() * 0.58f)
+            val x = centerX + cos(phase).toFloat() * orbit
+            val y = centerY + sin(phase).toFloat() * orbit * 0.78f - travel.toFloat() * s * 0.08f
+            val twinkle = (0.55 + 0.45 * sin(age * 4.0 + i)).toFloat()
+            val alpha = (190f * envelope * twinkle * (1f - travel.toFloat() * 0.22f)).toInt().coerceIn(0, 220)
+            magicDot.color = color
+            magicDot.alpha = alpha
+            val r = d * (1.05f + (i % 3) * 0.48f) * (0.78f + 0.22f * twinkle)
+            if (i % 4 == 0) {
+                c.save(); c.translate(x, y); c.rotate((age * 90f + i * 27f) % 360f)
+                c.drawRoundRect(-r * 0.55f, -r * 1.7f, r * 0.55f, r * 1.7f, r, r, magicDot); c.restore()
+            } else c.drawCircle(x, y, r, magicDot)
         }
     }
 
@@ -1033,14 +1268,32 @@ class OrangeView(
         if (!interactive || !hit(e)) return false
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                touchDownX = e.x; touchDownY = e.y; lastDragX = e.x
                 touchHeld = true
                 longFired = false
                 invalidate()
-                removeCallbacks(longPress); postDelayed(longPress, 480L)
+                holdStartedAt = SystemClock.uptimeMillis()
+                removeCallbacks(longPress); postDelayed(longPress, 4500L)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = e.x - lastDragX
+                if (abs(e.x - touchDownX) + abs(e.y - touchDownY) > 10f * d) {
+                    // A finger glide is interpreted as petting, not as a click. Gaze and leaf
+                    // follow the stroke while the underlying focus/scenario state continues.
+                    if (move != Move.EXIT) {
+                        petAt = SystemClock.uptimeMillis()
+                        petSide = if (dx < 0f) -1f else 1f
+                        petStrength = 1f
+                    }
+                    lastDragX = e.x
+                    invalidate()
+                }
                 return true
             }
             MotionEvent.ACTION_UP -> {
                 touchHeld = false
+                holdStartedAt = 0L
                 removeCallbacks(longPress)
                 invalidate()
                 if (!longFired) {
@@ -1059,10 +1312,13 @@ class OrangeView(
                             if (tapRun >= 3) { tapRun = 0; say("You've got this!") ; postDelayed({ if (isAttachedToWindow) say(null) }, 1500L) }
                             performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                             invalidate()
-                        } else if (!busy || prio(move) <= prio(Move.TAP)) {
+                        } else if (move != Move.EXIT) {
+                            petAt = now
+                            petSide = if (e.x < width / 2f) -1f else 1f
+                            petStrength = 1f
                             tapRun = if (now - lastTap < 2500L) tapRun + 1 else 1
-                            if (tapRun >= 3) { tapRun = 0; play(Move.GIGGLE, force = true) }
-                            else play(Move.TAP, force = true)
+                            if (tapRun >= 3 && !busy) { tapRun = 0; play(Move.GIGGLE, force = true) }
+                            else if (!busy || prio(move) <= prio(Move.TAP)) play(Move.TAP, force = true)
                         }
                         lastTap = now
                     }
@@ -1070,7 +1326,7 @@ class OrangeView(
                 }
                 return true
             }
-            MotionEvent.ACTION_CANCEL -> { touchHeld = false; removeCallbacks(longPress); invalidate(); return true }
+            MotionEvent.ACTION_CANCEL -> { touchHeld = false; holdStartedAt = 0L; removeCallbacks(longPress); invalidate(); return true }
         }
         return true
     }
