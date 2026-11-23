@@ -1356,7 +1356,7 @@ class MainActivity : Activity() {
         runWrap.addView(SoftClouds(this, pal.dark), FrameLayout.LayoutParams(matchP, matchP))
         runWrap.addView(run, FrameLayout.LayoutParams(matchP, wrapC))
         // one quiet Orange lives in the card's top-right corner for the whole session (not tappable)
-        calmOrange = OrangeView(this, fonts, pal.dark, 52f).apply { interactive = false; isClickable = false; visibility = View.GONE }
+        calmOrange = OrangeView(this, fonts, pal.dark, 52f).apply { interactive = true; isClickable = true; contentDescription = "Orange focus companion. Tap, pet, or hold for magic."; visibility = View.GONE }
         runWrap.addView(calmOrange, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.TOP or Gravity.END).apply {
             topMargin = dp(62); marginEnd = dp(8)
         })
@@ -1581,20 +1581,30 @@ class MainActivity : Activity() {
             }
             runLattice?.running = !onBreak
             calmOrange?.let { c ->
-                if (c.visibility != View.VISIBLE) {
+                val newlyShown = c.visibility != View.VISIBLE
+                if (newlyShown) {
                     c.visibility = View.VISIBLE
                     c.pivotX = dp(26).toFloat(); c.pivotY = dp(30).toFloat()
                     c.scaleX = 0.2f; c.scaleY = 0.2f; c.alpha = 0f
                     c.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(80).setDuration(620)
                         .setInterpolator(SpringInterpolator(13f, 0.55f, 0.7f)).start()
-                    c.play(Move.ENTER, 1f, true)
-                    c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.PANIC, 1f, true) }, 2150L)
-                    c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.FOCUS, 1f, true) }, 4650L)
+                    // Establish the initial state before scheduling entrance. Do not immediately
+                    // overwrite ENTER with the ordinary end-break SURPRISE transition.
+                    calmBreak = onBreak
+                    if (onBreak) {
+                        c.play(Move.SLEEP, 1f, true)
+                        c.say("Taking a little rest.")
+                    } else {
+                        c.play(Move.ENTER, 1f, true)
+                        c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.PANIC, 1f, true) }, 2150L)
+                        c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.FOCUS, 1f, true) }, 4650L)
+                    }
+                } else if (calmBreak == null) {
+                    calmBreak = onBreak
+                } else if (calmBreak != onBreak) {
+                    calmBreak = onBreak
+                    playBreakCompanionTransition(onBreak)
                 }
-            }
-            if (calmBreak == null || calmBreak != onBreak) {
-                calmBreak = onBreak
-                playBreakCompanionTransition(onBreak)
             }
             runLabel?.text = if (onBreak) "On break" else "Focusing"
             runElapsed?.text = clock(now - start)

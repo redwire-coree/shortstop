@@ -545,12 +545,24 @@ class OrangeView(
                 return true
             }
             Move.DEAD -> {
-                // Quiet, intentionally restrained defeated pose with a slow settling breath.
-                val settle = 1f - exp(-3.5f * t)
-                rot = 88f * settle; dy = s * 0.20f * settle
-                sx = 1.06f; sy = 0.78f + 0.02f * sin(t * 1.4f)
-                eyeOpenT = 0.08f; pupilT = 0f; mouthMode = 2; armL = 0.1f; armR = 0.1f
-                leafBiasT = -22f
+                // A staged collapse, not a permanently rotated still pose: recoil, lose balance,
+                // flop onto the side, then settle into a faint, slow breathing loop.
+                val recoil = (1f - exp(-10f * t)).coerceIn(0f, 1f)
+                val flop = sm(((t - 0.22f) / 0.72f).coerceIn(0f, 1f))
+                val settle = sm(((t - 0.94f) / 0.82f).coerceIn(0f, 1f))
+                val wobble = if (t < 1.8f) sin(t * 12f) * exp(-1.7f * t) else 0f
+                rot = (12f * recoil + 76f * flop - 76f * settle) + wobble * 7f
+                dy = s * (0.035f * recoil + 0.19f * flop + 0.025f * sin(t * 1.25f) * settle)
+                sx = 1f + 0.055f * flop - 0.025f * settle
+                sy = 1f - 0.18f * flop + 0.025f * sin(t * 1.25f) * settle
+                eyeOpenT = if (t < 0.58f) (1f - 0.92f * recoil) else 0.035f
+                pupilT = if (t < 0.58f) (1f - recoil) else 0f
+                mouthMode = 2
+                armL = 0.18f * (1f - flop) + 0.035f * abs(wobble)
+                armR = 0.26f * (1f - flop) + 0.035f * abs(wobble)
+                leafBiasT = -8f - 18f * flop
+                leafKick = 0.55f * (1f - settle) * abs(wobble)
+                blinkQuiet = 0.05f
                 return true
             }
             Move.PANIC -> {
