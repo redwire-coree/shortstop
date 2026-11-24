@@ -12,13 +12,17 @@ import android.view.View
 import kotlin.math.*
 import kotlin.random.Random
 
-enum class Move { ENTER, EXIT, IDLE, HOP, NOD, WAVE, POINT, CHEER, THINK, OOPS, FOCUS, BREAK, TASK, SURPRISE, TAP, GIGGLE, LISTEN, SLEEP, PROUD, ENCOURAGE, CELEBRATE, BEGGING, DEAD, PANIC, CRYING, FINAL_BOSS, OVERLOAD, VICTORY }
+enum class Move { ENTER, EXIT, IDLE, HOP, NOD, WAVE, POINT, CHEER, THINK, OOPS, FOCUS, BREAK, TASK, SURPRISE, TAP, GIGGLE, LISTEN, SLEEP, PROUD, ENCOURAGE, CELEBRATE, BEGGING, DEAD, PANIC, CRYING, FINAL_BOSS, OVERLOAD, VICTORY, WAKE, STRETCH }
 
 /**
  * Orange's artwork as separate, aligned layers (body, leaf, eye whites, pupils, highlights, mouth, sparks).
  * They were cut from the 4K source and the gaps behind them were filled in, so the pieces recombine into the
  * original picture. Decoded once and shared.
  */
+private const val NECK_X = 330f
+private const val NECK_Y = 430f
+private const val GROUND_Y = 642f
+
 object OrangeArt {
     class L(val bmp: Bitmap, val x: Float, val y: Float)
     val layers = HashMap<String, L>()
@@ -26,12 +30,16 @@ object OrangeArt {
     val eye = arrayOf(FloatArray(6), FloatArray(6))
     var mouthCx = 339f; var mouthCy = 385f
     var ok = false
+    /** Shoulder, elbow, wrist and fingertip of each arm in layer space (x, y per joint): left, right. */
+    val joints = arrayOf(floatArrayOf(150f, 448f, 105f, 462f, 62f, 478f, 18f, 490f), floatArrayOf(506f, 448f, 553f, 445f, 595f, 440f, 640f, 435f))
+    var rigArt = false
     private var tried = false
 
     fun ensure(c: Context): Boolean {
         if (tried) return ok
         tried = true
         try {
+            val rigNames = setOf("armL", "armR", "patchL", "patchR")
             val names = setOf("base", "leaf", "white0", "white1", "pupil0", "pupil1", "hl0", "hl1", "mouth", "sparks")
             c.assets.open("orange_layers.txt").bufferedReader().useLines { lines ->
                 for (line in lines) {
@@ -42,6 +50,13 @@ object OrangeArt {
                             val bmp = c.assets.open("mx_" + p[0] + ".png").use { BitmapFactory.decodeStream(it) }
                             layers[p[0]] = L(bmp, p[1].toFloat(), p[2].toFloat())
                         }
+                        p[0] in rigNames && p.size >= 5 -> {
+                            val bmp = c.assets.open("mx_" + p[0] + ".png").use { BitmapFactory.decodeStream(it) }
+                            layers[p[0]] = L(bmp, p[1].toFloat(), p[2].toFloat())
+                        }
+                        (p[0] == "jointL" || p[0] == "jointR") && p.size >= 9 -> {
+                            val j = joints[if (p[0] == "jointL") 0 else 1]; for (i in 0..7) j[i] = p[i + 1].toFloat()
+                        }
                         p[0] == "leafpivot" -> { leafPx = p[1].toFloat(); leafPy = p[2].toFloat() }
                         p[0] == "eye0" || p[0] == "eye1" -> { val e = eye[p[0].last() - '0']; for (i in 0..5) e[i] = p[i + 1].toFloat() }
                         p[0] == "mouthc" -> { mouthCx = p[1].toFloat(); mouthCy = p[2].toFloat() }
@@ -49,6 +64,7 @@ object OrangeArt {
                 }
             }
             ok = names.all { layers.containsKey(it) }
+            rigArt = ok && rigNames.all { layers.containsKey(it) }
         } catch (e: Exception) { ok = false }
         return ok
     }
@@ -180,6 +196,24 @@ class OrangeView(
     private val enterSpring = SpringInterpolator(14f, 0.5f, 0.9f)
     private var tx = 0f; private var ty = 0f
 
+    // ---- articulated rig: channels live in OrangeRig.kt, geometry is drawn here
+    private val rig = OrangeRig()
+    private var armMeshL: RigArm? = null
+    private var armMeshR: RigArm? = null
+    private val armVerts = FloatArray(11 * 11 * 2)
+    private val patchVerts = FloatArray(7 * 5 * 2)
+    private val legL = RigLeg(234f, 600f, -1f)
+    private val legR = RigLeg(374f, 600f, 1f)
+    private val legPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val footPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var legShader: Shader? = null
+    private val lidPath = Path()
+    // head: everything above the neck follows the head channels
+    private var neckX = 0f; private var neckY = 0f
+    private var headRotRad = 0f
+    private var afterMove: Move? = null
+    private var gazeX = 0f; private var gazeY = 0f
+
     // Pose-to-pose blending: body, face, arms and effects all travel together.
     private val blendFrom = FloatArray(16)
     private var blendStarted = 0L
@@ -231,6 +265,7 @@ class OrangeView(
         Move.CELEBRATE -> 8; Move.GIGGLE, Move.PROUD -> 6; Move.ENCOURAGE -> 5
         Move.TAP -> 1; Move.LISTEN, Move.SLEEP -> 2; Move.IDLE -> 0
         Move.BEGGING, Move.DEAD, Move.PANIC, Move.CRYING, Move.FINAL_BOSS, Move.OVERLOAD, Move.VICTORY -> 9
+        Move.WAKE -> 7; Move.STRETCH -> 3
     }
 
     private fun capturePose() {
@@ -256,6 +291,7 @@ class OrangeView(
     fun play(m: Move, dir: Float = 1f, force: Boolean = false) {
         // One-shot priority prevents low-value events from interrupting an important reaction.
         if (!force && busy && m != Move.EXIT && prio(m) < prio(move)) return
+        afterMove = null
         val now = SystemClock.uptimeMillis()
         capturePose()
         move = m; pointDir = if (dir >= 0f) 1f else -1f
@@ -266,6 +302,12 @@ class OrangeView(
         if (m == Move.ENTER) entranceStarted = now
         if (m == Move.EXIT) loopMoves = null
         invalidate()
+    }
+
+    /** Plays [m] and, when it finishes by itself, continues straight into [next] (for example WAKE then FOCUS). */
+    fun playThen(m: Move, next: Move) {
+        play(m, 1f, true)
+        afterMove = next
     }
 
     /** Plays these moves one after another with a pause between. */
@@ -490,6 +532,30 @@ class OrangeView(
                 leafBiasT = -2f
                 return true
             }
+            Move.WAKE, Move.STRETCH -> {
+                // Wake-up performance. WAKE starts asleep; STRETCH joins at the same stretch.
+                // 0-1.0 eyes open slowly while the head lifts; 1.0-2.5 yawn and a big stretch;
+                // 2.5-3.4 shake it off; then an attentive blink and nod (WAKE ends at 4.0 s).
+                val tt = if (move == Move.WAKE) t else t + 1.0f
+                val rise = sm((tt / 1.0f).coerceIn(0f, 1f))
+                eyeOpenT = if (tt < 1.0f) 0.07f + 0.5f * rise else 1f
+                val st = bump(tt, 1.0f, 2.5f)
+                sy = 1f + 0.075f * st * amp; sx = 1f - 0.04f * st * amp
+                dy = s * 0.03f * st * amp
+                mouthMode = 0; mouthYT = 1f + 0.85f * bump(tt, 1.1f, 2.2f)
+                happyT = if (tt in 1.25f..2.05f) 1f else 0f
+                leafBiasT = -9f * (1f - rise) + 7f * st
+                val sh = tt - 2.5f
+                if (tt > 2.5f && tt < 3.5f) {
+                    sy = 1f - 0.04f * exp(-5.0 * sh).toFloat() * cos(14.0 * sh).toFloat() * amp
+                    rot = 3f * sin(2.0 * Math.PI * 3.4 * sh).toFloat() * exp(-3.4 * sh).toFloat() * amp
+                    leafKick = 0.9f * exp(-3.0 * sh).toFloat()
+                }
+                if (tt in 3.4f..3.52f) blinkWanted = true
+                if (tt > 3.5f) { val nn = sm(((tt - 3.5f) / 0.35f).coerceIn(0f, 1f)); sy = 1f - 0.02f * sin(Math.PI * nn).toFloat() }
+                blinkQuiet = 0.2f
+                return tt < (if (move == Move.WAKE) 4.0f else 3.6f)
+            }
             Move.SLEEP -> {
                 // Slow breathing with a soft head dip and deliberately slow blinks.
                 val breath = sin(t * 1.05f)
@@ -682,154 +748,264 @@ class OrangeView(
     }
 
     // maps a point in layer space (640x640) to view pixels, using the current pose
-    private fun map(px: Float, py: Float, withArms: Boolean) {
+    private fun headWeight(py: Float): Float {
+        val u = ((NECK_Y - py) / 220f).coerceIn(0f, 1f)
+        return u * u * (3f - 2f * u)
+    }
+
+    private fun prepareHead() {
+        val x = mLeft + NECK_X * k; val y = mTop + NECK_Y * k
+        val w = (1f - NECK_Y / 640f) * (1f - NECK_Y / 640f)
+        neckX = cx + (x - cx) * sx + lag * s * w
+        neckY = feet - (feet - y) * sy
+        headRotRad = Math.toRadians(rig[RigCh.HEAD_ROT].toDouble()).toFloat()
+    }
+
+    private fun map(px: Float, py: Float, @Suppress("UNUSED_PARAMETER") withArms: Boolean) {
         val x = mLeft + px * k; val y = mTop + py * k
         val v = py / 640f
         val w = (1f - v) * (1f - v)
         var ox = cx + (x - cx) * sx + lag * s * w
         var oy = feet - (feet - y) * sy
-        if (withArms && (armL > 0.002f || armR > 0.002f)) {
-            val gl = armW(px, py, 100f, 470f) * armL
-            val gr = armW(px, py, 560f, 448f) * armR
-            oy -= s * 0.10f * (gl + gr)
-            ox += s * 0.05f * (gr - gl)
+        val hw = headWeight(py)
+        if (hw > 0f) {
+            val ang = headRotRad * hw
+            val ca = cos(ang); val sa = sin(ang)
+            val dx = ox - neckX; val dyy = oy - neckY
+            ox = neckX + dx * ca - dyy * sa + rig[RigCh.HEAD_X] * k * hw
+            oy = neckY + dx * sa + dyy * ca + rig[RigCh.HEAD_Y] * k * hw
         }
         tx = ox; ty = oy
     }
 
-    private fun armW(px: Float, py: Float, ax: Float, ay: Float): Float {
-        val a = px - ax; val b = py - ay
-        return exp(-(a * a + b * b) / (2f * 78f * 78f))
-    }
+    // ---- rig choreography: writes targets only; OrangeRig springs do the moving -----------------------------------------
 
-    /** Draws independently articulated arms and hands in mascot source coordinates.
-     * Curved upper/lower segments use separate joints, so gestures read as character acting
-     * instead of the whole orange being warped to imitate a wave. */
-    private fun drawArticulatedArms(c: Canvas, now: Long) {
-        if (armL < 0.045f && armR < 0.045f) return
-        val time = (now - t0) / 1000f
-        c.save()
-        c.translate(mLeft, mTop)
-        c.scale(k, k)
-        // Secondary joints are animated independently from the shoulder target. The small
-        // stagger creates overlap/follow-through: elbow leads, wrist trails, fingers settle last.
-        fun arm(side: Float, amountRaw: Float, phase: Float) {
-            val amount = amountRaw.coerceIn(0f, 1f)
-            if (amount < 0.035f) return
-            val shoulderX = if (side < 0f) 128f else 512f
-            val shoulderY = if (side < 0f) 466f else 452f
-            val beat = time * when (move) {
-                Move.WAVE -> 2.0f * Math.PI.toFloat() * 2.35f
-                Move.PANIC, Move.OVERLOAD -> 2.0f * Math.PI.toFloat() * 2.8f
-                Move.BEGGING -> 2.0f * Math.PI.toFloat() * 1.35f
-                Move.CRYING -> 2.0f * Math.PI.toFloat() * 0.72f
-                else -> 2.0f * Math.PI.toFloat() * 0.82f
+    private fun rigPose(@Suppress("UNUSED_PARAMETER") t: Float, now: Long) {
+        rig.begin()
+        val b = rig.base; val a = rig.add
+        val clock = now / 1000f
+        val tt = (now - t0) / 1000f * spd
+        val m = amp
+        // 1) legacy arm lift from the move table becomes shoulder angle, with the forearm and wrist following
+        val lL = (armL - 0.05f).coerceAtLeast(0f) * 118f
+        val lR = (armR - 0.05f).coerceAtLeast(0f) * 118f
+        b[RigCh.ARM_L_SH] = lL; b[RigCh.ARM_R_SH] = lR
+        b[RigCh.ARM_L_EL] = lL * 0.26f; b[RigCh.ARM_R_EL] = lR * 0.26f
+        b[RigCh.ARM_L_WR] = lL * 0.10f; b[RigCh.ARM_R_WR] = lR * 0.10f
+        // 2) every move can add its own body language on top
+        when (move) {
+            Move.IDLE, Move.ENTER, Move.EXIT, Move.LISTEN, Move.ENCOURAGE -> {
+                val br = sin(clock * 1.5f)
+                b[RigCh.HEAD_ROT] = 0.9f * sin(clock * 0.55f) * m
+                b[RigCh.HEAD_Y] = 0.9f * br * m
+                b[RigCh.ARM_L_SH] += 1.4f * br * m; b[RigCh.ARM_R_SH] += 1.4f * br * m
+                b[RigCh.ARM_L_WR] += 2.0f * sin(clock * 1.1f) * m; b[RigCh.ARM_R_WR] += 2.0f * sin(clock * 1.0f + 1.2f) * m
+                b[RigCh.FOOT_L_X] = 1.2f * sin(clock * 0.4f) * m; b[RigCh.FOOT_R_X] = -1.2f * sin(clock * 0.4f) * m
+                b[RigCh.LEG_L_ANKLE] = 1.5f * sin(clock * 0.8f) * m; b[RigCh.LEG_R_ANKLE] = -1.5f * sin(clock * 0.8f + 0.7f) * m
+                if (move == Move.LISTEN) { b[RigCh.HEAD_ROT] -= 4f; b[RigCh.PUPIL_X] = 0.25f * pointDir }
             }
-            val wave = sin(beat + phase)
-            val lagWave = sin(beat + phase - 0.72f)
-            val gesture = when (move) {
-                Move.BEGGING -> 0.16f + 0.10f * wave
-                Move.CRYING -> -0.10f + 0.07f * wave
-                Move.FINAL_BOSS -> 0.18f + 0.025f * wave
-                Move.VICTORY, Move.CHEER, Move.CELEBRATE -> 0.20f + 0.08f * wave
-                Move.PANIC, Move.OVERLOAD -> 0.10f + 0.16f * wave
-                Move.WAVE -> 0.34f * wave
-                Move.DEAD, Move.SLEEP -> -0.08f
-                else -> 0.035f * wave
+            Move.FOCUS -> {
+                // settled and attentive: head a touch forward, brows set, arms tucked, feet planted
+                val br = sin(clock * 0.95f)
+                b[RigCh.HEAD_Y] = 2.4f + 0.7f * br * m; b[RigCh.HEAD_ROT] = -1.1f
+                b[RigCh.ARM_L_SH] = lL - 4f + 0.9f * br * m; b[RigCh.ARM_R_SH] = lR - 4f + 0.9f * br * m
+                b[RigCh.LID_L_COVER] = 0.10f; b[RigCh.LID_R_COVER] = 0.10f
+                b[RigCh.LID_L_TILT] = 0.20f; b[RigCh.LID_R_TILT] = 0.20f
+                b[RigCh.PUPIL_Y] = 0.04f
+                b[RigCh.FOOT_L_X] = -1f; b[RigCh.FOOT_R_X] = 1f
             }
-            val lift = (amount * (0.78f + 0.22f * (0.5f + 0.5f * wave))).coerceIn(0f, 1f)
-            val elbowBend = (0.20f + amount * 0.30f + gesture).coerceIn(-0.05f, 0.72f)
-            val elbowX = shoulderX + side * (30f + 36f * lift - 8f * elbowBend)
-            val elbowY = shoulderY - (18f + 70f * lift) + wave * amount * 5f
-            val wristX = shoulderX + side * (54f + 78f * lift - 13f * elbowBend)
-            val wristY = shoulderY - (8f + 139f * lift) + lagWave * amount * 15f + elbowBend * 13f
-            val path = Path().apply {
-                moveTo(shoulderX, shoulderY)
-                cubicTo(shoulderX + side * 18f, shoulderY - 16f - 25f * lift,
-                    elbowX - side * 14f, elbowY + 19f, elbowX, elbowY)
-                cubicTo(elbowX + side * (15f + 8f * elbowBend), elbowY - 12f * lift,
-                    wristX - side * 13f, wristY + 19f + lagWave * 4f, wristX, wristY)
+            Move.BREAK -> {
+                // relaxed: head tilted, shoulders dropped, soft half-lidded eyes, feet apart
+                val br = sin(clock * 0.8f)
+                b[RigCh.HEAD_ROT] = 3.6f + 0.8f * sin(clock * 0.37f) * m; b[RigCh.HEAD_Y] = 1.5f + 0.8f * br * m
+                b[RigCh.ARM_L_SH] = lL - 8f + 1.0f * br * m; b[RigCh.ARM_R_SH] = lR - 8f + 1.0f * br * m
+                b[RigCh.LID_L_COVER] = 0.22f; b[RigCh.LID_R_COVER] = 0.22f
+                b[RigCh.LID_L_TILT] = -0.12f; b[RigCh.LID_R_TILT] = -0.12f
+                b[RigCh.MOUTH_SMILE] = 0.5f
+                b[RigCh.FOOT_L_X] = -5f; b[RigCh.FOOT_R_X] = 5f
+                b[RigCh.LEG_L_ANKLE] = -3f; b[RigCh.LEG_R_ANKLE] = -3f
             }
-            limbOutline.strokeWidth = 38f
-            limbFill.strokeWidth = 27f
-            c.drawPath(path, limbOutline)
-            c.drawPath(path, limbFill)
-            c.save()
-            c.translate(wristX, wristY)
-            val wristAngle = side * (-12f + 9f * wave + 7f * lagWave - amount * 7f)
-            c.rotate(wristAngle)
-            // A slightly different palm silhouette for clenched determination vs open gestures.
-            val fist = move == Move.FINAL_BOSS || move == Move.PANIC || move == Move.OVERLOAD
-            limbOutline.style = Paint.Style.FILL
-            c.drawOval(if (fist) -18f else -20f, -17f, if (fist) 18f else 20f, 18f, limbOutline)
-            c.drawOval(-15f, -14f, 15f, 14f, handFill)
-            limbOutline.style = Paint.Style.STROKE
-            limbOutline.strokeWidth = 7f
-            if (!fist) {
-                val fan = (0.72f + 0.28f * sin(beat + phase - 1.1f)).coerceIn(0.35f, 1f)
-                for (finger in -1..1) {
-                    val fx = finger * 9f
-                    c.drawLine(fx, -8f, fx + finger * 5f * fan, -19f - amount * 7f * fan, limbOutline)
+            Move.SLEEP -> {
+                // dozing: head drooped to one side, arms limp, eyes shut, feet drawn in
+                val br = sin(clock * 1.05f)
+                b[RigCh.HEAD_ROT] = 8f + 0.9f * sin(clock * 0.48f) * m; b[RigCh.HEAD_Y] = 7f + 0.8f * br * m
+                b[RigCh.ARM_L_SH] = -15f + 1.0f * br * m; b[RigCh.ARM_R_SH] = -15f + 1.0f * br * m
+                b[RigCh.ARM_L_WR] = -6f; b[RigCh.ARM_R_WR] = -6f
+                b[RigCh.LID_L_COVER] = 0.95f; b[RigCh.LID_R_COVER] = 0.95f
+                b[RigCh.MOUTH_OPEN] = 0.7f; b[RigCh.MOUTH_SMILE] = 0.2f
+                b[RigCh.FOOT_L_X] = -3f; b[RigCh.FOOT_R_X] = 3f
+                b[RigCh.LEG_L_ANKLE] = -6f; b[RigCh.LEG_R_ANKLE] = -6f
+            }
+            Move.WAKE, Move.STRETCH -> {
+                val w2 = if (move == Move.WAKE) tt else tt + 1.0f
+                // starts as the sleeping pose and releases it
+                val sleepy = 1f - sm((w2 / 1.0f).coerceIn(0f, 1f))
+                b[RigCh.HEAD_ROT] = 8f * sleepy; b[RigCh.HEAD_Y] = 7f * sleepy
+                b[RigCh.ARM_L_SH] = -15f * sleepy; b[RigCh.ARM_R_SH] = -15f * sleepy
+                b[RigCh.LID_L_COVER] = 0.95f * sleepy; b[RigCh.LID_R_COVER] = 0.95f * sleepy
+                // 0.25-1.0: one hand rubs the eye
+                val rub = bump(w2, 0.2f, 1.05f)
+                b[RigCh.ARM_L_SH] += 88f * rub; b[RigCh.ARM_L_EL] += 26f * rub
+                b[RigCh.ARM_L_WR] += 10f * rub * sin(w2 * 22f)
+                // 1.0-2.5: big two-armed stretch with open hands, head back, up on tiptoe
+                val st = sm(((w2 - 0.95f) / 0.45f).coerceIn(0f, 1f)) * (1f - sm(((w2 - 2.1f) / 0.5f).coerceIn(0f, 1f)))
+                b[RigCh.ARM_L_SH] += 104f * st; b[RigCh.ARM_R_SH] += 104f * st
+                b[RigCh.ARM_L_EL] += 6f * st; b[RigCh.ARM_R_EL] += 6f * st
+                b[RigCh.ARM_L_WR] += 16f * st; b[RigCh.ARM_R_WR] += 16f * st
+                b[RigCh.ARM_L_HAND] = 1f + 0.18f * st; b[RigCh.ARM_R_HAND] = 1f + 0.18f * st
+                b[RigCh.HEAD_ROT] += -6f * st; b[RigCh.HEAD_Y] += -5f * st
+                b[RigCh.FOOT_L_LIFT] = 5f * st; b[RigCh.FOOT_R_LIFT] = 5f * st
+                b[RigCh.LEG_L_ANKLE] += -14f * st; b[RigCh.LEG_R_ANKLE] += -14f * st
+                b[RigCh.MOUTH_OPEN] = 1f + 0.5f * st
+                // 2.5-3.4: shake it off, then eyes wander once and lock forward
+                val sh = (w2 - 2.5f).coerceAtLeast(0f)
+                if (w2 > 2.5f) {
+                    b[RigCh.HEAD_ROT] += 6f * sin(2.0 * Math.PI * 3.4 * sh).toFloat() * exp(-3.4 * sh).toFloat()
+                    b[RigCh.PUPIL_X] = 0.55f * sin(sh * 4.2f) * (1f - sm(((w2 - 3.2f) / 0.4f).coerceIn(0f, 1f)))
                 }
-            } else {
-                c.drawLine(-7f, -7f, 7f, -7f, limbOutline)
+                if (w2 > 3.55f) { val nod = bump(w2, 3.55f, 3.95f); b[RigCh.HEAD_Y] += 2.5f * nod; b[RigCh.HEAD_ROT] += -1.1f * sm(((w2 - 3.55f) / 0.3f).coerceIn(0f, 1f)) }
             }
-            c.restore()
+            Move.TAP -> {
+                val e = exp(-6.0 * tt).toFloat()
+                b[RigCh.ARM_L_SH] += 12f * e * m; b[RigCh.ARM_R_SH] += 12f * e * m
+                b[RigCh.ARM_L_WR] += 8f * sin(22f * tt) * e * m; b[RigCh.ARM_R_WR] += 8f * sin(22f * tt + 1f) * e * m
+                b[RigCh.HEAD_ROT] = 3f * sin(24f * tt) * e * m
+                b[RigCh.FOOT_L_LIFT] = 3f * bump(tt, 0f, 0.22f) * m; b[RigCh.FOOT_R_LIFT] = 3f * bump(tt, 0.05f, 0.27f) * m
+            }
+            Move.THINK -> {
+                // one hand comes up toward the chin, head tilted, eyes drift up and away
+                val u = sm((tt / 0.45f).coerceIn(0f, 1f))
+                b[RigCh.ARM_R_SH] = 62f * u; b[RigCh.ARM_R_EL] = 34f * u; b[RigCh.ARM_R_WR] = 12f * u
+                b[RigCh.HEAD_ROT] = -5f * u + 1.2f * sin(clock * 0.9f) * m
+                b[RigCh.PUPIL_X] = -0.45f * u; b[RigCh.PUPIL_Y] = -0.40f * u
+                b[RigCh.LID_L_COVER] = 0.08f * u; b[RigCh.LID_R_COVER] = 0.08f * u
+            }
+            Move.WAVE -> {
+                // the raised arm waves from the forearm and wrist; the shoulder barely moves
+                val w = 2.0f * Math.PI.toFloat() * 2.35f
+                val ph = sin(w * tt); val lagged = sin(w * tt - 0.9f)
+                b[RigCh.ARM_R_EL] += 15f * ph * (lR / 70f).coerceIn(0f, 1f); b[RigCh.ARM_R_WR] += 22f * lagged * (lR / 70f).coerceIn(0f, 1f)
+                b[RigCh.ARM_L_EL] += 15f * ph * (lL / 70f).coerceIn(0f, 1f); b[RigCh.ARM_L_WR] += 22f * lagged * (lL / 70f).coerceIn(0f, 1f)
+                b[RigCh.HEAD_ROT] = 2.5f * sin(w * tt - 0.4f) * (lR / 70f).coerceIn(0f, 1f)
+            }
+            Move.CHEER, Move.CELEBRATE, Move.VICTORY, Move.HOP -> {
+                val up = ((lL + lR) / 160f).coerceIn(0f, 1f)
+                b[RigCh.ARM_L_WR] += 14f * sin(tt * 9f) * up; b[RigCh.ARM_R_WR] += 14f * sin(tt * 9f + 1.3f) * up
+                b[RigCh.ARM_L_EL] += 8f * sin(tt * 9f - 0.8f) * up; b[RigCh.ARM_R_EL] += 8f * sin(tt * 9f + 0.5f) * up
+                b[RigCh.HEAD_ROT] = 3f * sin(tt * 7f) * up
+            }
+            else -> {
+                b[RigCh.HEAD_ROT] = 0.8f * sin(clock * 0.6f) * m
+            }
         }
-        arm(-1f, armL, 0.4f)
-        arm(1f, armR, 1.8f)
-        c.restore()
+        // 3) legs react to the body: feet leave the ground in the air, knees bend on landing
+        val lift = (dy / k) * 0.5f
+        a[RigCh.FOOT_L_LIFT] += lift; a[RigCh.FOOT_R_LIFT] += lift * 0.85f
+        val land = ((1f - sy) * 160f).coerceIn(0f, 18f)
+        a[RigCh.LEG_L_KNEE] += land; a[RigCh.LEG_R_KNEE] += land
+        a[RigCh.FOOT_L_X] += -land * 0.25f; a[RigCh.FOOT_R_X] += land * 0.25f
+        // 4) overlays that sit on top of whatever the move is doing
+        if (touchSquash > 0.01f) {
+            a[RigCh.ARM_L_SH] += 6f * touchSquash; a[RigCh.ARM_R_SH] += 6f * touchSquash
+            a[RigCh.HEAD_Y] += 2.2f * touchSquash
+        }
+        val petAge = if (petAt == 0L) 2f else ((now - petAt) / 1000f).coerceAtLeast(0f)
+        val petPulse = if (petAge < 0.82f) sin(Math.PI * (petAge / 0.82f)).toFloat() else 0f
+        if (petPulse > 0.001f) {
+            a[RigCh.HEAD_ROT] += petSide * 5f * petPulse
+            if (petSide < 0f) { a[RigCh.ARM_L_SH] += 18f * petPulse; a[RigCh.ARM_L_WR] += 8f * petPulse }
+            else { a[RigCh.ARM_R_SH] += 18f * petPulse; a[RigCh.ARM_R_WR] += 8f * petPulse }
+            a[RigCh.MOUTH_SMILE] += 0.6f * petPulse
+        }
+        if (touchHeld) {
+            // the finger is on him: eyes and head follow it
+            a[RigCh.PUPIL_X] += gazeX * 0.85f; a[RigCh.PUPIL_Y] += gazeY * 0.6f
+            a[RigCh.HEAD_ROT] += gazeX * 4f
+            // holding for the long-press: he charges up (arms lift, leaf quivers, eyes go wide)
+            if (!longFired && holdStartedAt != 0L) {
+                val p = (((now - holdStartedAt) - 500L) / 4000f).coerceIn(0f, 1f)
+                if (p > 0f) {
+                    a[RigCh.ARM_L_SH] += 34f * p; a[RigCh.ARM_R_SH] += 34f * p
+                    a[RigCh.LEAF_BEND] += 5f * p * sin(now / 55f)
+                    a[RigCh.EYE_L_OPEN] += 0.08f * p; a[RigCh.EYE_R_OPEN] += 0.08f * p
+                    a[RigCh.MOUTH_SMILE] += 0.7f * p
+                }
+            }
+        }
     }
 
-    /**
-     * Small articulated feet give the mascot a readable centre of gravity. They are drawn as
-     * separate upper/lower segments with a soft foot roll, rather than deforming the body bitmap.
-     * Motion is deterministic from the active move clock, so loops remain seamless.
-     */
-    private fun drawArticulatedLegs(c: Canvas, now: Long) {
-        val time = (now - t0) / 1000f
-        val idle = move == Move.IDLE || move == Move.FOCUS || move == Move.BREAK || move == Move.THINK
-        val gait = when (move) {
-            Move.HOP, Move.CHEER, Move.VICTORY -> sin(time * 8.2f)
-            Move.PANIC, Move.OVERLOAD -> sin(time * 15f) * 0.72f
-            Move.DEAD, Move.SLEEP -> 0f
-            else -> if (idle) sin(now / 1250f) * 0.16f else sin(time * 6.0f) * 0.28f
+    // ---- rig drawing ----------------------------------------------------------------------------------------
+
+    private fun ensureRigGeometry() {
+        if (armMeshL != null || !OrangeArt.rigArt) return
+        val l = L["armL"]; val r = L["armR"]
+        if (l != null && r != null) {
+            armMeshL = RigArm(l.bmp, l.x, l.y, OrangeArt.joints[0], 1f)
+            armMeshR = RigArm(r.bmp, r.x, r.y, OrangeArt.joints[1], -1f)
         }
-        val lift = when (move) {
-            Move.HOP, Move.CHEER, Move.VICTORY -> abs(gait) * 0.22f
-            Move.PANIC, Move.OVERLOAD -> abs(gait) * 0.10f
-            Move.DEAD, Move.SLEEP -> 0f
-            else -> 0.025f + abs(gait) * 0.035f
-        }
-        c.save()
-        c.translate(mLeft, mTop)
-        c.scale(k, k)
-        fun leg(side: Float, phase: Float) {
-            val swing = sin(time * (if (move == Move.PANIC || move == Move.OVERLOAD) 15f else 6.0f) + phase) * gait.let { if (it == 0f) 0f else 1f }
-            val hipX = 250f + side * 62f
-            val hipY = 570f
-            val kneeX = hipX + side * (8f + swing * 13f)
-            val kneeY = 606f - lift * 70f
-            val ankleX = hipX + side * (13f + swing * 22f)
-            val ankleY = 630f - lift * 105f
-            val path = Path().apply {
-                moveTo(hipX, hipY)
-                cubicTo(hipX + side * 5f, hipY + 17f, kneeX - side * 7f, kneeY - 8f, kneeX, kneeY)
-                cubicTo(kneeX + side * 8f, kneeY + 10f, ankleX - side * 5f, ankleY - 8f, ankleX, ankleY)
-            }
-            limbOutline.strokeWidth = 31f
-            limbFill.strokeWidth = 22f
-            c.drawPath(path, limbOutline)
-            c.drawPath(path, limbFill)
+        val g = LinearGradient(0f, feet - s * 0.02f, 0f, feet + s * 0.09f, 0xFFFF9B2A.toInt(), 0xFFFB6208.toInt(), Shader.TileMode.CLAMP)
+        legShader = g
+        legPaint.shader = g; footPaint.shader = g
+    }
+
+    /** Legs sit behind the body, so only the feet and a little shin ever show; they bend with the body. */
+    private fun drawRigLegs(c: Canvas) {
+        ensureRigGeometry()
+        val r = rig.cur
+        legL.solve(-6f + r[RigCh.FOOT_L_X], r[RigCh.FOOT_L_LIFT], r[RigCh.LEG_L_HIP], r[RigCh.LEG_L_KNEE], r[RigCh.LEG_L_ANKLE], GROUND_Y)
+        legR.solve(6f + r[RigCh.FOOT_R_X], r[RigCh.FOOT_R_LIFT], r[RigCh.LEG_R_HIP], r[RigCh.LEG_R_KNEE], r[RigCh.LEG_R_ANKLE], GROUND_Y)
+        for (n in 0..1) {
+            val lg = if (n == 0) legL else legR
+            val hx = if (n == 0) 234f else 374f
+            legPaint.strokeWidth = 25f * k
+            map(hx, 600f, false); val ax = tx; val ay = ty
+            map(lg.kneeX, lg.kneeY, false); val bx = tx; val by = ty
+            map(lg.ankleX, lg.ankleY, false); val cx2 = tx; val cy2 = ty
+            c.drawLine(ax, ay, bx, by, legPaint)
+            c.drawLine(bx, by, cx2, cy2, legPaint)
             c.save()
-            c.translate(ankleX + side * 8f, ankleY + 2f)
-            c.rotate(side * (swing * 9f - lift * 18f))
-            c.drawOval(-22f, -10f, 24f, 13f, handFill)
+            c.translate(cx2 + (if (n == 0) -3f else 3f) * k, cy2 + 4f * k)
+            c.rotate(lg.footAngle)
+            rect.set(-27f * k, -14f * k, 27f * k, 14f * k)
+            c.drawOval(rect, footPaint)
             c.restore()
         }
-        leg(-1f, 0f)
-        leg(1f, Math.PI.toFloat())
-        c.restore()
+    }
+
+    /** The corner slivers of the original silhouette: full strength at rest, gone as soon as an arm moves. */
+    private fun drawRigPatches(c: Canvas) {
+        val r = rig.cur
+        for (n in 0..1) {
+            val p = L[if (n == 0) "patchL" else "patchR"] ?: continue
+            val sh = if (n == 0) r[RigCh.ARM_L_SH] else r[RigCh.ARM_R_SH]
+            val el = if (n == 0) r[RigCh.ARM_L_EL] else r[RigCh.ARM_R_EL]
+            val a = (1f - (abs(sh) / 9f + abs(el) / 22f)).coerceIn(0f, 1f)
+            if (a < 0.02f) continue
+            var i = 0
+            for (rr in 0..4) for (col in 0..6) {
+                map(p.x + p.bmp.width * col / 6f, p.y + p.bmp.height * rr / 4f, false)
+                patchVerts[i++] = tx; patchVerts[i++] = ty
+            }
+            paint.alpha = (255 * a).toInt()
+            c.drawBitmapMesh(p.bmp, 6, 4, patchVerts, 0, null, 0, paint)
+            paint.alpha = 255
+        }
+    }
+
+    /** Both arms: each is a three-bone skin of the original arm artwork, in front of the body and the face. */
+    private fun drawRigArms(c: Canvas) {
+        val r = rig.cur
+        for (n in 0..1) {
+            val arm = (if (n == 0) armMeshL else armMeshR) ?: continue
+            val o = if (n == 0) RigCh.ARM_L_SH else RigCh.ARM_R_SH
+            arm.deform(r[o], r[o + 1], r[o + 2], r[o + 3])
+            var i = 0
+            for (v in 0 until arm.count) {
+                map(arm.pos[v * 2], arm.pos[v * 2 + 1], false)
+                armVerts[i++] = tx; armVerts[i++] = ty
+            }
+            c.drawBitmapMesh(arm.bmp, arm.cols, arm.rows, armVerts, 0, null, 0, paint)
+        }
     }
 
     private fun drawEye(c: Canvas, i: Int, bl: Float) {
@@ -838,28 +1014,46 @@ class OrangeView(
         val pu = L["pupil$i"] ?: return
         val hl = L["hl$i"] ?: return
         map(e[0], e[1], false)
+        val rg = rig.cur
+        val op = (eyeOpen * bl * rg[RigCh.EYE_L_OPEN + i]).coerceAtLeast(0f)
         c.save()
         c.translate(tx, ty)
-        if (happy > 0.5f || eyeOpen * bl < 0.2f) {
+        c.rotate(rg[RigCh.HEAD_ROT] * headWeight(e[1]))
+        if (happy > 0.5f || op < 0.2f) {
             // closed eye: a soft arc (happy = upward, blink/sleepy = downward)
             c.scale(k * sx, k * sy)
             val w = white.bmp.width * 0.55f; val h = white.bmp.height * 0.2f
             if (happy > 0.5f) { rect.set(-w / 2f, -h * 0.2f, w / 2f, h * 1.8f); c.drawArc(rect, 200f, 140f, false, lid) }
             else { rect.set(-w / 2f, -h * 1.5f, w / 2f, h * 0.5f); c.drawArc(rect, 20f, 140f, false, lid) }
         } else {
-            c.scale(k * sx, k * sy * (eyeOpen * bl).coerceIn(0.05f, 1.15f))
+            c.scale(k * sx, k * sy * op.coerceIn(0.05f, 1.15f))
+            // lids: how much of the eye is covered from above, and how slanted the lid line is
+            val cover = rg[RigCh.LID_L_COVER + i].coerceIn(0f, 1f); val tilt = rg[RigCh.LID_L_TILT + i].coerceIn(-1f, 1f)
+            if (cover > 0.01f || abs(tilt) > 0.02f) {
+                val wl = white.x - e[0]; val wt = white.y - e[1]; val ww = white.bmp.width.toFloat(); val wh = white.bmp.height.toFloat()
+                val yc = wt + wh * cover
+                val dyt = tilt * wh * 0.30f
+                val yIn = yc + dyt; val yOut = yc - dyt
+                // eye 0 is the left eye: its inner corner is on the right; eye 1 is mirrored
+                val yl = if (i == 0) yOut else yIn; val yr = if (i == 0) yIn else yOut
+                lidPath.reset()
+                lidPath.moveTo(wl - 6f, yl); lidPath.lineTo(wl + ww + 6f, yr)
+                lidPath.lineTo(wl + ww + 6f, wt + wh + 6f); lidPath.lineTo(wl - 6f, wt + wh + 6f); lidPath.close()
+                c.clipPath(lidPath)
+            }
             c.drawBitmap(white.bmp, white.x - e[0], white.y - e[1], paint)
-            val gx = lookX * 20f; val gy = lookY * 13f
+            val gx = (lookX + rg[RigCh.PUPIL_X]).coerceIn(-1.2f, 1.2f) * 20f; val gy = (lookY + rg[RigCh.PUPIL_Y]).coerceIn(-1.2f, 1.2f) * 13f
+            val pupilS = pupil * rg[RigCh.PUPIL_SCALE]
             // pupil
             val pcx = e[2] - e[0] + gx; val pcy = e[3] - e[1] + gy
             c.save()
             c.translate(pcx, pcy)
-            c.scale(pupil, pupil)
+            c.scale(pupilS, pupilS)
             c.drawBitmap(pu.bmp, pu.x - e[2], pu.y - e[3], paint)
             c.restore()
             // highlight sits a little ahead of the pupil, so the gaze feels round
-            val hcx = pcx + (e[4] - e[2]) * pupil + gx * 0.12f
-            val hcy = pcy + (e[5] - e[3]) * pupil + gy * 0.12f
+            val hcx = pcx + (e[4] - e[2]) * pupilS + gx * 0.12f
+            val hcy = pcy + (e[5] - e[3]) * pupilS + gy * 0.12f
             c.drawBitmap(hl.bmp, hl.x - e[4] + hcx, hl.y - e[5] + hcy, paint)
         }
         c.restore()
@@ -871,12 +1065,13 @@ class OrangeView(
         c.save()
         c.translate(tx, ty)
         c.scale(k * sx, k * sy)
-        if (mouthMode == 1) {
-            rect.set(-34f, -30f, 34f, 14f)
-            c.drawArc(rect, 25f, 130f, false, lipP)
+        val smile = rig[RigCh.MOUTH_SMILE]
+        if (mouthMode == 1 || (abs(smile) > 0.25f && mouthMode == 0 && rig[RigCh.MOUTH_OPEN] < 1.05f)) {
+            if (smile < -0.25f) { rect.set(-34f, 2f, 34f, 46f); c.drawArc(rect, 205f, 130f, false, lipP) }
+            else { rect.set(-34f, -30f, 34f, 14f); c.drawArc(rect, 25f, 130f, false, lipP) }
         } else {
             val o = if (mouthMode == 2) 0.55f else 1f
-            c.scale(o, if (mouthMode == 2) 0.85f else 1f)
+            c.scale(o, (if (mouthMode == 2) 0.85f else 1f) * mouthY * rig[RigCh.MOUTH_OPEN])
             c.drawBitmap(m.bmp, m.x - OrangeArt.mouthCx, m.y - OrangeArt.mouthCy, paint)
         }
         c.restore()
@@ -1054,13 +1249,22 @@ class OrangeView(
             busy = false
         } else if (!running) {
             // finished: back to idle (picked up by the loop, if any)
-            move = Move.IDLE; t0 = now; t = 0f; pose(0f); busy = false
+            val nm = afterMove ?: Move.IDLE
+            afterMove = null
+            capturePose()
+            move = nm; t0 = now; t = 0f
+            blendStarted = now; blendDuration = 320L; blendActive = nm != Move.IDLE
+            pose(0f); busy = false
         } else {
             busy = move == Move.EXIT || (running && move != Move.IDLE && move != Move.FOCUS &&
                 move != Move.BREAK && move != Move.THINK && move != Move.POINT &&
                 move != Move.LISTEN && move != Move.SLEEP)
         }
         update(now, dt)
+        ensureRigGeometry()
+        rigPose(t, now)
+        rig.step(dt)
+        prepareHead()
 
         val lm = loopMoves
         if (lm != null && move == Move.IDLE && now >= nextAt && lm.isNotEmpty()) {
@@ -1110,13 +1314,14 @@ class OrangeView(
                 verts[i++] = tx; verts[i++] = ty
             }
         }
+        if (armMeshL != null) drawRigLegs(c)
         c.drawBitmapMesh(base.bmp, gridC, gridR, verts, 0, null, 0, paint)
-        drawArticulatedLegs(c, now)
-        drawArticulatedArms(c, now)
+        if (armMeshL != null) drawRigPatches(c)
 
         drawMouth(c)
         val bl = blinkFactor(now)
         drawEye(c, 0, bl); drawEye(c, 1, bl)
+        if (armMeshL != null) drawRigArms(c)
 
         // leaf, hinged at the stem
         val leaf = L["leaf"]
@@ -1124,7 +1329,7 @@ class OrangeView(
             map(OrangeArt.leafPx, OrangeArt.leafPy, false)
             c.save()
             c.translate(tx, ty)
-            c.rotate(leafA)
+            c.rotate(leafA + rig[RigCh.HEAD_ROT] * headWeight(OrangeArt.leafPy) + rig[RigCh.LEAF_BEND])
             c.scale(k * sx, k * sy)
             c.drawBitmap(leaf.bmp, leaf.x - OrangeArt.leafPx, leaf.y - OrangeArt.leafPy, paint)
             c.restore()
@@ -1224,7 +1429,40 @@ class OrangeView(
         }
     }
 
+    /** While the finger is down: a ring fills over 4.5 s with sparkles that build up, then the aurora fires. */
+    private fun drawHoldProgress(c: Canvas, now: Long) {
+        if (!touchHeld || longFired || holdStartedAt == 0L) return
+        val held = now - holdStartedAt
+        if (held < 500L) return
+        val p = ((held - 500L) / 4000f).coerceIn(0f, 1f)
+        val color = if (dark) Color.rgb(255, 151, 65) else Color.rgb(112, 174, 124)
+        val centerX = cx; val centerY = mTop + s * 0.49f
+        val rad = s * 0.58f
+        val fade = ((held - 500L) / 250f).coerceIn(0f, 1f)
+        magicRing.strokeWidth = 3.2f * d
+        magicRing.color = color; magicRing.alpha = (60 * fade).toInt()
+        c.drawCircle(centerX, centerY, rad, magicRing)
+        magicRing.alpha = (235 * fade).toInt()
+        rect.set(centerX - rad, centerY - rad, centerX + rad, centerY + rad)
+        c.drawArc(rect, -90f, 360f * p, false, magicRing)
+        // soft glow that grows with the charge
+        magicGlow.shader = RadialGradient(centerX, centerY, rad * 1.5f,
+            intArrayOf(Color.argb((46 * p * fade).toInt(), Color.red(color), Color.green(color), Color.blue(color)), Color.TRANSPARENT),
+            floatArrayOf(0.35f, 1f), Shader.TileMode.CLAMP)
+        c.drawCircle(centerX, centerY, rad * 1.5f, magicGlow)
+        magicGlow.shader = null
+        // sparkles appear one by one along the ring as it fills
+        val n = (p * 12f).toInt()
+        for (j in 0 until n) {
+            val ang = -Math.PI.toFloat() / 2f + j * (2f * Math.PI.toFloat() / 12f)
+            val tw = (0.55f + 0.45f * sin(now / 140.0 + j * 1.7)).toFloat()
+            magicDot.color = color; magicDot.alpha = (210 * tw).toInt()
+            c.drawCircle(centerX + cos(ang) * (rad + 5f * d), centerY + sin(ang) * (rad + 5f * d), d * (1.2f + 0.9f * tw), magicDot)
+        }
+    }
+
     private fun drawLongPressMagic(c: Canvas, now: Long) {
+        drawHoldProgress(c, now)
         if (magicAt == 0L) return
         val age = (now - magicAt) / 1000f
         if (age >= 2.6f) { magicAt = 0L; return }
@@ -1281,6 +1519,7 @@ class OrangeView(
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 touchDownX = e.x; touchDownY = e.y; lastDragX = e.x
+                gazeX = ((e.x - cx) / (s * 0.5f)).coerceIn(-1f, 1f); gazeY = ((e.y - (mTop + s * 0.45f)) / (s * 0.5f)).coerceIn(-1f, 1f)
                 touchHeld = true
                 longFired = false
                 invalidate()
@@ -1290,6 +1529,7 @@ class OrangeView(
             }
             MotionEvent.ACTION_MOVE -> {
                 val dx = e.x - lastDragX
+                gazeX = ((e.x - cx) / (s * 0.5f)).coerceIn(-1f, 1f); gazeY = ((e.y - (mTop + s * 0.45f)) / (s * 0.5f)).coerceIn(-1f, 1f)
                 if (abs(e.x - touchDownX) + abs(e.y - touchDownY) > 10f * d) {
                     // A finger glide is interpreted as petting, not as a click. Gaze and leaf
                     // follow the stroke while the underlying focus/scenario state continues.
@@ -1304,7 +1544,7 @@ class OrangeView(
                 return true
             }
             MotionEvent.ACTION_UP -> {
-                touchHeld = false
+                touchHeld = false; gazeX = 0f; gazeY = 0f
                 holdStartedAt = 0L
                 removeCallbacks(longPress)
                 invalidate()
@@ -1338,7 +1578,7 @@ class OrangeView(
                 }
                 return true
             }
-            MotionEvent.ACTION_CANCEL -> { touchHeld = false; holdStartedAt = 0L; removeCallbacks(longPress); invalidate(); return true }
+            MotionEvent.ACTION_CANCEL -> { touchHeld = false; gazeX = 0f; gazeY = 0f; holdStartedAt = 0L; removeCallbacks(longPress); invalidate(); return true }
         }
         return true
     }
