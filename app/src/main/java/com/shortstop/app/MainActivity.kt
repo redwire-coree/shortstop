@@ -1530,7 +1530,7 @@ class MainActivity : Activity() {
             stage.postDelayed({ action() }, 160L)
         }
         fun mv(m: Move, then: Move? = null): () -> Unit = { if (then != null) stage.playThen(m, then) else stage.play(m, 1f, true) }
-        val items = listOf(
+        val items: List<Pair<String, () -> Unit>> = listOf<Pair<String, () -> Unit>>(
             "Idle" to mv(Move.IDLE), "Blink" to { stage.blinkNow() }, "Tap" to mv(Move.TAP),
             "Pet" to { stage.petNow() }, "Hold 4.5 s" to { stage.previewHold() }, "Focus" to mv(Move.FOCUS),
             "Break" to mv(Move.BREAK), "Sleeping" to mv(Move.SLEEP), "Waking" to { stage.play(Move.SLEEP, 1f, true); stage.postDelayed({ stage.playThen(Move.WAKE, Move.IDLE) }, 2500L) },
