@@ -125,6 +125,16 @@ class OrangeView(
     private var petStrength = 0f
     // A tactile press is a separate, reversible squash overlay; it never changes the active move.
     private var touchHeld = false
+    private var dragged = false
+    private var downAt = 0L
+    /** Ring progress that is actually drawn: follows the hold exactly while pressed, eases back to 0 on release. */
+    private var holdShown = 0f
+    /** Zzz layer: fades in only while the eyes are really shut, restarts its sequence on every new sleep. */
+    private var zzzLevel = 0f
+    private var zzzT = 0f
+    /** Where a tap-wake goes afterwards (the app sets BREAK during a break so Orange rests instead of hopping about). */
+    var wakeTo: Move = Move.IDLE
+    var onWoke: (() -> Unit)? = null
     private var touchSquash = 0f
     private var touchDownX = 0f
     private var touchDownY = 0f
@@ -236,13 +246,16 @@ class OrangeView(
     private val tail = Path()
 
     private val longPress = Runnable {
-        if (interactive && touchHeld && move != Move.EXIT) {
+        // fires at most once per press: longFired is set first and every later path checks it
+        if (interactive && touchHeld && !longFired && !dragged && holdStartedAt != 0L && move != Move.EXIT) {
             longFired = true
             val now = SystemClock.uptimeMillis()
             magicAt = now
             petAt = now
             petStrength = 1f
             performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            // a small happy hop when Orange is free; focus / break / sleep poses are only touched by the pet overlay
+            if (move == Move.IDLE || move == Move.TAP) play(Move.HOP, 1f, true)
             invalidate()
         }
     }
@@ -803,6 +816,19 @@ class OrangeView(
                 b[RigCh.FOOT_L_X] = 1.2f * sin(clock * 0.4f) * m; b[RigCh.FOOT_R_X] = -1.2f * sin(clock * 0.4f) * m
                 b[RigCh.LEG_L_ANKLE] = 1.5f * sin(clock * 0.8f) * m; b[RigCh.LEG_R_ANKLE] = -1.5f * sin(clock * 0.8f + 0.7f) * m
                 if (move == Move.LISTEN) { b[RigCh.HEAD_ROT] -= 4f; b[RigCh.PUPIL_X] = 0.25f * pointDir }
+                if (move == Move.IDLE) {
+                    // one small, quiet variation at a time with long pauses between them
+                    val cyc = clock / 7.3f
+                    val slot = cyc.toInt(); val f = cyc - slot
+                    val bumpV = if (f in 0.25f..0.60f) sin(Math.PI * (f - 0.25f) / 0.35f).toFloat() else 0f
+                    val side = if (slot % 2 == 0) 1f else -1f
+                    when (slot % 4) {
+                        0 -> { b[RigCh.PUPIL_X] += 0.38f * side * bumpV; b[RigCh.HEAD_ROT] += 1.6f * side * bumpV }
+                        1 -> { b[RigCh.HEAD_X] += 1.8f * side * bumpV; b[RigCh.FOOT_L_X] += 2f * side * bumpV; b[RigCh.FOOT_R_X] += 2f * side * bumpV }
+                        2 -> { b[RigCh.MOUTH_SMILE] += 0.45f * bumpV; b[RigCh.LEAF_BEND] += 4f * side * bumpV }
+                        else -> Unit
+                    }
+                }
             }
             Move.FOCUS -> {
                 // settled and attentive: head a touch forward, brows set, arms tucked, feet planted
@@ -1179,20 +1205,6 @@ class OrangeView(
                     c.drawPath(spiral,stroke)
                 }
             }
-            Move.SLEEP -> {
-                // Quiet, continuous sleep cues: staggered Zs drift upward, soften, and
-                // respawn on a fixed cycle so the loop never pops or flickers.
-                for (i in 0..2) {
-                    val p = ((phase * 0.19f + i * 0.34f) % 1f + 1f) % 1f
-                    val x = cx0 + s * (0.23f + i * 0.085f) + sin(phase * 1.1f + i) * s * 0.018f
-                    val y = top + s * (0.16f - p * 0.22f)
-                    sleepText.textSize = s * (0.075f + i * 0.012f)
-                    sleepText.color = if (dark) 0xFFFFC58E.toInt() else 0xFF8B765F.toInt()
-                    sleepText.alpha = (150f * sin(Math.PI * p).toFloat()).toInt().coerceIn(0, 150)
-                    c.drawText("z".repeat(i + 1), x, y, sleepText)
-                }
-                sleepText.alpha = 255
-            }
             Move.VICTORY -> {
                 val crownY = top - s*.015f + s*.018f*sin(phase*3f)
                 val crown = Path().apply { moveTo(cx0-s*.25f,crownY+s*.12f); lineTo(cx0-s*.30f,crownY-s*.05f); lineTo(cx0-s*.13f,crownY+s*.02f); lineTo(cx0,crownY-s*.14f); lineTo(cx0+s*.13f,crownY+s*.02f); lineTo(cx0+s*.30f,crownY-s*.05f); lineTo(cx0+s*.25f,crownY+s*.12f); close() }
@@ -1386,6 +1398,11 @@ class OrangeView(
 
         // Long-press magic: a small, soft aurora halo with drifting sprinkles. It is deliberately
         // restrained and follows the app theme (sage in light mode, warm orange in dark mode).
+        run {
+            val tgt = if (touchHeld && !longFired && holdStartedAt != 0L) ((now - holdStartedAt) / 4500f).coerceIn(0f, 1f) else 0f
+            holdShown = if (tgt >= holdShown) tgt else { val v = holdShown * exp(-14.0 * dt).toFloat(); if (v < 0.003f) 0f else v }
+        }
+        drawZzz(c, dt)
         drawLongPressMagic(c, now)
 
         // speech bubble
@@ -1422,88 +1439,91 @@ class OrangeView(
             val ambientLoop = move == Move.FOCUS || move == Move.BREAK || move == Move.SLEEP || move == Move.IDLE ||
                 move == Move.BEGGING || move == Move.DEAD || move == Move.PANIC || move == Move.CRYING ||
                 move == Move.FINAL_BOSS || move == Move.OVERLOAD || move == Move.VICTORY
-            val moving = busy || petAnimating || magicAnimating || (touchHeld && !longFired) || blinkStart != 0L || abs(leafV) > 0.4f ||
+            val moving = busy || holdShown > 0f || zzzLevel > 0.01f || petAnimating || magicAnimating || (touchHeld && !longFired) || blinkStart != 0L || abs(leafV) > 0.4f ||
                 abs(leafA - leafBias) > 0.15f || lm != null || ambientLoop
             // Keep character motion on the display frame clock; only static/offscreen states may idle.
             if (moving) postInvalidateOnAnimation() else postInvalidateDelayed(40)
         }
     }
 
-    /** While the finger is down: a ring fills over 4.5 s with sparkles that build up, then the aurora fires. */
+    /** The hold ring: a thin warm-orange arc that fills continuously over exactly 4.5 s around Orange. */
     private fun drawHoldProgress(c: Canvas, now: Long) {
-        if (!touchHeld || longFired || holdStartedAt == 0L) return
-        val held = now - holdStartedAt
-        if (held < 500L) return
-        val p = ((held - 500L) / 4000f).coerceIn(0f, 1f)
-        val color = if (dark) Color.rgb(255, 151, 65) else Color.rgb(112, 174, 124)
-        val centerX = cx; val centerY = mTop + s * 0.49f
-        val rad = s * 0.58f
-        val fade = ((held - 500L) / 250f).coerceIn(0f, 1f)
-        magicRing.strokeWidth = 3.2f * d
-        magicRing.color = color; magicRing.alpha = (60 * fade).toInt()
+        if (holdShown <= 0.004f) return
+        val holding = touchHeld && !longFired && holdStartedAt != 0L
+        val fade = if (holding) ((now - holdStartedAt) / 220f).coerceIn(0f, 1f) else (holdShown * 8f).coerceIn(0f, 1f)
+        if (fade <= 0f) return
+        val color = if (dark) Color.rgb(255, 168, 82) else Color.rgb(234, 120, 28)
+        val centerX = cx; val centerY = mTop + s * 0.47f
+        val rad = s * 0.47f
+        magicRing.strokeWidth = 2.1f * d
+        magicRing.color = color; magicRing.alpha = (46 * fade).toInt()
         c.drawCircle(centerX, centerY, rad, magicRing)
-        magicRing.alpha = (235 * fade).toInt()
+        magicRing.alpha = (240 * fade).toInt()
         rect.set(centerX - rad, centerY - rad, centerX + rad, centerY + rad)
-        c.drawArc(rect, -90f, 360f * p, false, magicRing)
-        // soft glow that grows with the charge
-        magicGlow.shader = RadialGradient(centerX, centerY, rad * 1.5f,
-            intArrayOf(Color.argb((46 * p * fade).toInt(), Color.red(color), Color.green(color), Color.blue(color)), Color.TRANSPARENT),
-            floatArrayOf(0.35f, 1f), Shader.TileMode.CLAMP)
-        c.drawCircle(centerX, centerY, rad * 1.5f, magicGlow)
-        magicGlow.shader = null
-        // sparkles appear one by one along the ring as it fills
-        val n = (p * 12f).toInt()
-        for (j in 0 until n) {
-            val ang = -Math.PI.toFloat() / 2f + j * (2f * Math.PI.toFloat() / 12f)
-            val tw = (0.55f + 0.45f * sin(now / 140.0 + j * 1.7)).toFloat()
-            magicDot.color = color; magicDot.alpha = (210 * tw).toInt()
-            c.drawCircle(centerX + cos(ang) * (rad + 5f * d), centerY + sin(ang) * (rad + 5f * d), d * (1.2f + 0.9f * tw), magicDot)
-        }
+        c.drawArc(rect, -90f, 360f * holdShown, false, magicRing)
+        // a small bright bead rides the end of the arc
+        val ang = (-Math.PI / 2.0 + 2.0 * Math.PI * holdShown).toFloat()
+        magicDot.color = Color.rgb(255, 214, 160); magicDot.alpha = (255 * fade).toInt()
+        c.drawCircle(centerX + cos(ang) * rad, centerY + sin(ang) * rad, 2.3f * d, magicDot)
     }
 
+    /** Completion: one soft ring pulse and a few sparkles. Everything stays inside the view so nothing is clipped. */
     private fun drawLongPressMagic(c: Canvas, now: Long) {
         drawHoldProgress(c, now)
         if (magicAt == 0L) return
         val age = (now - magicAt) / 1000f
-        if (age >= 2.6f) { magicAt = 0L; return }
-        val fadeIn = (age / 0.22f).coerceIn(0f, 1f)
-        val fadeOut = (1f - ((age - 1.55f) / 1.05f).coerceIn(0f, 1f))
-        val envelope = (fadeIn * fadeOut).coerceIn(0f, 1f)
-        val color = if (dark) Color.rgb(255, 151, 65) else Color.rgb(112, 174, 124)
-        val centerX = cx
-        val centerY = mTop + s * 0.49f
-        val radius = s * (0.27f + 0.11f * sm((age / 1.2f).coerceIn(0f, 1f)))
-
-        magicGlow.shader = RadialGradient(centerX, centerY, radius * 1.8f,
-            intArrayOf(Color.argb((48 * envelope).toInt(), Color.red(color), Color.green(color), Color.blue(color)),
-                Color.argb((18 * envelope).toInt(), Color.red(color), Color.green(color), Color.blue(color)),
-                Color.TRANSPARENT), floatArrayOf(0f, 0.58f, 1f), Shader.TileMode.CLAMP)
-        c.drawCircle(centerX, centerY, radius * 1.8f, magicGlow)
-        magicGlow.shader = null
-
-        magicRing.color = color
-        magicRing.alpha = (105 * envelope).toInt()
-        magicRing.strokeWidth = 1.35f * d
-        val ringRadius = radius * (0.92f + 0.12f * sin(age * 2.1f))
-        c.drawCircle(centerX, centerY, ringRadius, magicRing)
-
-        // Deterministic orbital particles: no per-frame allocations or random flicker.
-        for (i in 0 until 14) {
-            val phase = i * (Math.PI * 2.0 / 14.0) + age * (0.72 + (i % 3) * 0.12)
-            val travel = (age * (0.30 + (i % 4) * 0.045) + i * 0.071) % 1.0
-            val orbit = radius * (0.72f + travel.toFloat() * 0.58f)
-            val x = centerX + cos(phase).toFloat() * orbit
-            val y = centerY + sin(phase).toFloat() * orbit * 0.78f - travel.toFloat() * s * 0.08f
-            val twinkle = (0.55 + 0.45 * sin(age * 4.0 + i)).toFloat()
-            val alpha = (190f * envelope * twinkle * (1f - travel.toFloat() * 0.22f)).toInt().coerceIn(0, 220)
-            magicDot.color = color
-            magicDot.alpha = alpha
-            val r = d * (1.05f + (i % 3) * 0.48f) * (0.78f + 0.22f * twinkle)
-            if (i % 4 == 0) {
-                c.save(); c.translate(x, y); c.rotate((age * 90f + i * 27f) % 360f)
-                c.drawRoundRect(-r * 0.55f, -r * 1.7f, r * 0.55f, r * 1.7f, r, r, magicDot); c.restore()
+        if (age >= 1.25f) { magicAt = 0L; return }
+        val color = if (dark) Color.rgb(255, 168, 82) else Color.rgb(234, 120, 28)
+        val centerX = cx; val centerY = mTop + s * 0.47f
+        val e = sm((age / 0.55f).coerceIn(0f, 1f))
+        val envelope = (1f - ((age - 0.25f) / 1.0f).coerceIn(0f, 1f))
+        // the full ring flashes bright, then breathes out and fades
+        magicRing.color = color; magicRing.strokeWidth = (2.1f - 0.9f * e) * d
+        magicRing.alpha = (235 * envelope).toInt()
+        c.drawCircle(centerX, centerY, s * (0.47f + 0.03f * e), magicRing)
+        val bottom = mTop + s * 0.99f
+        for (i in 0 until 8) {
+            val a = (i * Math.PI / 4.0 + 0.4).toFloat()
+            val travel = sm(((age - 0.05f - (i % 2) * 0.05f) / 0.8f).coerceIn(0f, 1f))
+            val rr = s * (0.47f + 0.16f * travel)
+            val x = centerX + cos(a) * rr
+            val y = centerY + sin(a) * rr - s * 0.03f * travel
+            if (y > bottom) continue
+            val tw = 0.65f + 0.35f * sin(age * 18f + i)
+            magicDot.color = color; magicDot.alpha = (230f * envelope * (1f - travel * 0.5f) * tw).toInt().coerceIn(0, 255)
+            val r = d * (1.2f + (i % 3) * 0.5f)
+            if (i % 2 == 0) {
+                c.save(); c.translate(x, y); c.rotate(45f)
+                c.drawRoundRect(-r, -r, r, r, r * 0.35f, r * 0.35f, magicDot); c.restore()
             } else c.drawCircle(x, y, r, magicDot)
         }
+    }
+
+    /** Zzz: its own layer. Three letters rise in turn, grow a little, sway and fade, then the cycle repeats seamlessly. */
+    private fun drawZzz(c: Canvas, dt: Float) {
+        val asleep = move == Move.SLEEP && rig[RigCh.LID_L_COVER] > 0.55f
+        zzzLevel = if (asleep) min(1f, zzzLevel + dt * 1.1f) else max(0f, zzzLevel - dt * 3.2f)
+        if (zzzLevel <= 0.01f) { zzzT = 0f; return }
+        zzzT += dt
+        val ox = cx + s * 0.27f; val oy = mTop + s * 0.20f
+        sleepText.color = if (dark) 0xFFFFC58E.toInt() else 0xFF8A6A4F.toInt()
+        for (i in 0..2) {
+            val local = zzzT - 0.5f - i * 1.15f
+            if (local < 0f) continue
+            val u = (local % 3.45f) / 3.45f
+            val inA = sm((u / 0.16f).coerceIn(0f, 1f))
+            val outA = 1f - sm(((u - 0.55f) / 0.45f).coerceIn(0f, 1f))
+            val a = inA * outA * zzzLevel
+            if (a <= 0.01f) continue
+            sleepText.textSize = s * (0.085f + 0.05f * u)
+            sleepText.alpha = (235f * a).toInt()
+            val x = ox + s * 0.11f * u + sin(u * 5.2f + i * 1.7f) * s * 0.014f
+            val y = oy - s * 0.34f * u
+            c.save(); c.rotate(-10f + 6f * sin(u * 4f + i), x, y)
+            c.drawText("Z", x, y, sleepText)
+            c.restore()
+        }
+        sleepText.alpha = 255
     }
 
     // ---- touch: a tap is a small playful reaction, a long press is a surprised one
@@ -1522,8 +1542,10 @@ class OrangeView(
                 gazeX = ((e.x - cx) / (s * 0.5f)).coerceIn(-1f, 1f); gazeY = ((e.y - (mTop + s * 0.45f)) / (s * 0.5f)).coerceIn(-1f, 1f)
                 touchHeld = true
                 longFired = false
+                dragged = false
+                downAt = SystemClock.uptimeMillis()
                 invalidate()
-                holdStartedAt = SystemClock.uptimeMillis()
+                holdStartedAt = downAt
                 removeCallbacks(longPress); postDelayed(longPress, 4500L)
                 return true
             }
@@ -1531,6 +1553,8 @@ class OrangeView(
                 val dx = e.x - lastDragX
                 gazeX = ((e.x - cx) / (s * 0.5f)).coerceIn(-1f, 1f); gazeY = ((e.y - (mTop + s * 0.45f)) / (s * 0.5f)).coerceIn(-1f, 1f)
                 if (abs(e.x - touchDownX) + abs(e.y - touchDownY) > 10f * d) {
+                    // moving the finger away cancels the hold: the ring eases back and nothing fires
+                    if (!dragged && !longFired) { dragged = true; removeCallbacks(longPress); holdStartedAt = 0L }
                     // A finger glide is interpreted as petting, not as a click. Gaze and leaf
                     // follow the stroke while the underlying focus/scenario state continues.
                     if (move != Move.EXIT) {
@@ -1545,10 +1569,11 @@ class OrangeView(
             }
             MotionEvent.ACTION_UP -> {
                 touchHeld = false; gazeX = 0f; gazeY = 0f
+                val heldMs = SystemClock.uptimeMillis() - downAt
                 holdStartedAt = 0L
                 removeCallbacks(longPress)
                 invalidate()
-                if (!longFired) {
+                if (!longFired && !dragged && heldMs <= 600L) {
                     val now = SystemClock.uptimeMillis()
                     // Count deliberate taps even while the short TAP reaction is settling.
                     // The old `!busy` guard made the three-tap GIGGLE effectively unreachable:
@@ -1566,7 +1591,8 @@ class OrangeView(
                             invalidate()
                         } else if (move == Move.SLEEP) {
                             performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                            playThen(Move.WAKE, Move.IDLE)
+                            playThen(Move.WAKE, wakeTo)
+                            onWoke?.invoke()
                         } else if (move != Move.EXIT) {
                             petAt = now
                             petSide = if (e.x < width / 2f) -1f else 1f
@@ -1578,6 +1604,9 @@ class OrangeView(
                         lastTap = now
                     }
                     performClick()
+                } else if (!longFired && !dragged && move != Move.EXIT) {
+                    // a longer press that was let go early is a gentle pet, not a tap
+                    petAt = SystemClock.uptimeMillis(); petSide = if (e.x < width / 2f) -1f else 1f; petStrength = 1f
                 }
                 return true
             }

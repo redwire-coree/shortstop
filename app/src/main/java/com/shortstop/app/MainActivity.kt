@@ -1356,7 +1356,8 @@ class MainActivity : Activity() {
         runWrap.addView(SoftClouds(this, pal.dark), FrameLayout.LayoutParams(matchP, matchP))
         runWrap.addView(run, FrameLayout.LayoutParams(matchP, wrapC))
         // one quiet Orange lives in the card's top-right corner for the whole session (not tappable)
-        calmOrange = OrangeView(this, fonts, pal.dark, 52f).apply { interactive = true; isClickable = true; contentDescription = "Orange focus companion. Tap, pet, or hold for magic."; visibility = View.GONE }
+        calmOrange = OrangeView(this, fonts, pal.dark, 52f).apply { interactive = true; wakeTo = Move.BREAK;
+            onWoke = { postDelayed({ if (isAttachedToWindow && Store.focusRunning(this@MainActivity) && Store.onBreak(this@MainActivity)) play(Move.SLEEP, 1f, true) }, 9000L) }; isClickable = true; contentDescription = "Orange focus companion. Tap, pet, or hold for magic."; visibility = View.GONE }
         runWrap.addView(calmOrange, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.TOP or Gravity.END).apply {
             topMargin = dp(62); marginEnd = dp(8)
         })
@@ -1490,14 +1491,13 @@ class MainActivity : Activity() {
         val o = calmOrange ?: return@Runnable
         if (o.isAttachedToWindow && Store.focusRunning(this) && Store.onBreak(this)) {
             o.play(Move.SLEEP, 1f, true)
-            o.say("Zzz...")
-            o.postDelayed({ if (o.isAttachedToWindow) o.say(null) }, 1800L)
         }
     }
 
     private fun playBreakCompanionTransition(onBreak: Boolean) {
         val orange = calmOrange ?: return
-        orange.animate().cancel()
+        // Cancelling a half-finished pop-in leaves the view part-transparent and shrunk: settle it fully instead.
+        orange.animate().cancel(); orange.alpha = 1f; orange.scaleX = 1f; orange.scaleY = 1f
         // A newer transition always wins: pending callbacks from the old one are cancelled first.
         orange.removeCallbacks(breakSleepRun)
         if (onBreak) {
@@ -1605,8 +1605,7 @@ class MainActivity : Activity() {
                         c.say("Taking a little rest.")
                     } else {
                         c.play(Move.ENTER, 1f, true)
-                        c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.PANIC, 1f, true) }, 2150L)
-                        c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.FOCUS, 1f, true) }, 4650L)
+                        c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.FOCUS, 1f, true) }, 1500L)
                     }
                 } else if (calmBreak == null) {
                     calmBreak = onBreak
