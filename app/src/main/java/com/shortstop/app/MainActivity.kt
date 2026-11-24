@@ -1486,22 +1486,31 @@ class MainActivity : Activity() {
         updateRunning()
     }
 
+    private val breakSleepRun = Runnable {
+        val o = calmOrange ?: return@Runnable
+        if (o.isAttachedToWindow && Store.focusRunning(this) && Store.onBreak(this)) {
+            o.play(Move.SLEEP, 1f, true)
+            o.say("Zzz...")
+            o.postDelayed({ if (o.isAttachedToWindow) o.say(null) }, 1800L)
+        }
+    }
+
     private fun playBreakCompanionTransition(onBreak: Boolean) {
         val orange = calmOrange ?: return
         orange.animate().cancel()
+        // A newer transition always wins: pending callbacks from the old one are cancelled first.
+        orange.removeCallbacks(breakSleepRun)
         if (onBreak) {
-            orange.removeCallbacks(sleepRun)
-            orange.play(Move.SLEEP, 1f, true)
-            orange.say("Taking a little rest.")
+            // relax first, then drift off to sleep a few seconds later
+            orange.play(Move.BREAK, 1f, true)
+            orange.say("Phew. Break time.")
+            orange.postDelayed({ if (orange.isAttachedToWindow) orange.say(null) }, 2200L)
+            orange.postDelayed(breakSleepRun, 3200L)
         } else {
-            orange.play(Move.SURPRISE, 1f, true)
-            orange.say("Ready when you are.")
-            orange.postDelayed({
-                if (orange.isAttachedToWindow && Store.focusRunning(this) && !Store.onBreak(this)) {
-                    orange.play(Move.FOCUS, 1f, true)
-                    orange.say(null)
-                }
-            }, 1050L)
+            // a full wake-up: eyes open, hand rubs the eye, yawn and stretch, shake it off, then attentive focus
+            orange.say("Good morning!")
+            orange.playThen(Move.WAKE, Move.FOCUS)
+            orange.postDelayed({ if (orange.isAttachedToWindow) orange.say(null) }, 3000L)
         }
     }
 

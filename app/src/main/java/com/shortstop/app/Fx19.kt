@@ -1564,6 +1564,9 @@ class OrangeView(
                             if (tapRun >= 3) { tapRun = 0; say("You've got this!") ; postDelayed({ if (isAttachedToWindow) say(null) }, 1500L) }
                             performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                             invalidate()
+                        } else if (move == Move.SLEEP) {
+                            performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                            playThen(Move.WAKE, Move.IDLE)
                         } else if (move != Move.EXIT) {
                             petAt = now
                             petSide = if (e.x < width / 2f) -1f else 1f
