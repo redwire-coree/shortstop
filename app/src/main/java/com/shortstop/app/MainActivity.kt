@@ -1514,6 +1514,65 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * DEVELOPER ONLY. A private stage with its own Orange: pick an animation, replay it, reset to idle.
+     * It never touches the focus timer, sessions, streaks or any saved preference.
+     */
+    private fun showAnimationShowcase() {
+        val stage = OrangeView(this, fonts, pal.dark, 104f).apply { interactive = true }
+        val name = tv("Idle", 16f, fonts.semi, FocusTheme.title(pal.dark), Gravity.CENTER).apply { setPadding(0, dp(4), 0, dp(8)) }
+        val log = tv("", 10f, fonts.regular, FocusTheme.muted(pal.dark)).apply { setPadding(dp(4), dp(8), dp(4), dp(4)); typeface = Typeface.MONOSPACE }
+        var last: (() -> Unit)? = null
+        fun run(label: String, action: () -> Unit) {
+            name.text = label
+            last = { name.text = label; stage.resetToIdle(); stage.postDelayed({ action() }, 160L) }
+            stage.resetToIdle()
+            stage.postDelayed({ action() }, 160L)
+        }
+        fun mv(m: Move, then: Move? = null): () -> Unit = { if (then != null) stage.playThen(m, then) else stage.play(m, 1f, true) }
+        val items = listOf(
+            "Idle" to mv(Move.IDLE), "Blink" to { stage.blinkNow() }, "Tap" to mv(Move.TAP),
+            "Pet" to { stage.petNow() }, "Hold 4.5 s" to { stage.previewHold() }, "Focus" to mv(Move.FOCUS),
+            "Break" to mv(Move.BREAK), "Sleeping" to mv(Move.SLEEP), "Waking" to { stage.play(Move.SLEEP, 1f, true); stage.postDelayed({ stage.playThen(Move.WAKE, Move.IDLE) }, 2500L) },
+            "Stretch" to mv(Move.STRETCH), "Dead" to mv(Move.DEAD), "Panic" to mv(Move.PANIC),
+            "Begging" to mv(Move.BEGGING), "Crying" to mv(Move.CRYING), "Rage (final boss)" to mv(Move.FINAL_BOSS),
+            "Overload" to mv(Move.OVERLOAD), "Victory" to mv(Move.VICTORY), "Hop" to mv(Move.HOP),
+            "Nod" to mv(Move.NOD), "Wave" to mv(Move.WAVE), "Point" to mv(Move.POINT),
+            "Cheer" to mv(Move.CHEER), "Think" to mv(Move.THINK), "Oops" to mv(Move.OOPS),
+            "Surprise" to mv(Move.SURPRISE), "Giggle" to mv(Move.GIGGLE), "Listen" to mv(Move.LISTEN),
+            "Proud" to mv(Move.PROUD), "Encourage" to mv(Move.ENCOURAGE), "Celebrate" to mv(Move.CELEBRATE),
+            "Task done" to mv(Move.TASK), "Enter" to mv(Move.ENTER),
+            "Exit, then back" to { stage.play(Move.EXIT, 1f, true); stage.postDelayed({ stage.play(Move.ENTER, 1f, true) }, 1300L) }
+        )
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(12)) }
+        box.addView(stage, lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        box.addView(name, lp(matchP, wrapC))
+        val ctl = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        ctl.addView(pill("Replay", true) { last?.invoke() }, lp(0, wrapC, 1f).apply { rightMargin = dp(8) })
+        ctl.addView(pill("Reset to idle", false) { name.text = "Idle"; last = null; stage.resetToIdle() }, lp(0, wrapC, 1f))
+        box.addView(ctl, lp(matchP, wrapC).apply { bottomMargin = dp(12) })
+        items.chunked(3).forEach { row ->
+            val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.forEachIndexed { i, (label, action) ->
+                r.addView(pill(label, false) { run(label, action) }, lp(0, wrapC, 1f).apply { if (i < 2) rightMargin = dp(6); bottomMargin = dp(6) })
+            }
+            repeat(3 - row.size) { r.addView(View(this), lp(0, wrapC, 1f)) }
+            box.addView(r, lp(matchP, wrapC))
+        }
+        box.addView(tv("Event log (what changes Orange's opacity, scale and moves)", 11f, fonts.medium, FocusTheme.muted(pal.dark)).apply { setPadding(dp(4), dp(10), 0, 0) }, lp(matchP, wrapC))
+        box.addView(log, lp(matchP, wrapC))
+        val refresh = object : Runnable {
+            override fun run() {
+                if (!log.isAttachedToWindow) return
+                log.text = OrangeDiag.last(9)
+                log.postDelayed(this, 600L)
+            }
+        }
+        log.post(refresh)
+        val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(box) }
+        showSheet("Animation showcase", scroll)
+    }
+
     private fun playEarlyQuitReaction() {
         val c = companionOrange ?: return
         val prefs = Store.prefs(this)
@@ -1523,7 +1582,8 @@ class MainActivity : Activity() {
         prefs.edit().putString("orange_quit_day", day).putInt("orange_quit_count", count).apply()
         companionMessage(if (count >= 3) "Want to pause, or try one more minute?" else "One more minute, or finish here?")
         c.play(if (count >= 3) Move.DEAD else Move.BEGGING, 1f, true)
-        c.postDelayed({ if (c.isAttachedToWindow) c.play(Move.IDLE, 1f, true) }, 4200L)
+        // the dead performance runs its own recovery (about 6.2 s), so let it finish before idle takes over
+        c.postDelayed({ if (c.isAttachedToWindow) c.play(Move.IDLE, 1f, true) }, if (count >= 3) 6800L else 4200L)
     }
 
     private fun onEndClick() {
@@ -3804,6 +3864,8 @@ class MainActivity : Activity() {
         val sPerm = sSection("Permissions and help")
         val fix = sCard()
         fix.sAdd(sLink("Show me around", "Meet Orange and replay the quick tour") { showTour() })
+        // DEVELOPER ONLY: remove this one line (and showAnimationShowcase) before a production release.
+        fix.sAdd(sLink("Animation showcase", "Developer preview of every Orange animation. Saves nothing.") { showAnimationShowcase() })
         fix.sAdd(sRow("Accessibility service", "Needed to block Shorts and apps", sTrail(sStatus(serviceOn()))) { open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) })
         fix.sAdd(sRow("Notification access", "Lets Shortstop see notifications", sTrail(sStatus(notifAccess()))) { open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
         fix.sAdd(sRow("Usage access", "For screen time and stats", sTrail(sStatus(usageGranted()))) { open(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })

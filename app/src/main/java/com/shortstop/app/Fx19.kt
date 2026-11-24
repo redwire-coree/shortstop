@@ -23,6 +23,24 @@ private const val NECK_X = 330f
 private const val NECK_Y = 430f
 private const val GROUND_Y = 642f
 
+/** Temporary diagnostics: every opacity/scale/visibility anomaly and every move change is recorded here. */
+object OrangeDiag {
+    private val lines = ArrayDeque<String>()
+    @Synchronized fun log(tag: String, msg: String) {
+        val l = String.format(java.util.Locale.US, "%6.1f %-6s %s", (SystemClock.uptimeMillis() % 1_000_000L) / 1000f, tag, msg)
+        android.util.Log.d("OrangeDiag", l)
+        lines.addLast(l); while (lines.size > 60) lines.removeFirst()
+    }
+    @Synchronized fun last(n: Int): String = lines.toList().takeLast(n).joinToString("\n")
+    fun caller(): String {
+        for (e in Throwable().stackTrace) {
+            val c = e.className
+            if (c.startsWith("com.shortstop") && !c.contains("OrangeDiag") && !c.contains("OrangeView")) return "${(e.fileName ?: "?").removeSuffix(".kt")}:${e.lineNumber}"
+        }
+        return "?"
+    }
+}
+
 object OrangeArt {
     class L(val bmp: Bitmap, val x: Float, val y: Float)
     val layers = HashMap<String, L>()
@@ -126,6 +144,19 @@ class OrangeView(
     // A tactile press is a separate, reversible squash overlay; it never changes the active move.
     private var touchHeld = false
     private var dragged = false
+    private var xEyes = 0f
+    private var slideX = 0f
+    // watchdog for the view's own opacity / scale (set by animators in the host screens)
+    private var fxSince = 0L
+    private var fxLastA = 1f; private var fxLastS = 1f
+    private val xPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = 0xFF4A2410.toInt() }
+    private val tonguePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFF7C8E.toInt() }
+    // hold ring: a rounded silhouette that hugs the whole character, built once
+    private val ringPath = Path(); private val ringSeg = Path()
+    private val ringMeasure = PathMeasure()
+    private val ringPos = FloatArray(2)
+    private var ringLen = 0f
+    private var ringBuilt = false
     private var downAt = 0L
     /** Ring progress that is actually drawn: follows the hold exactly while pressed, eases back to 0 on release. */
     private var holdShown = 0f
@@ -304,6 +335,7 @@ class OrangeView(
     fun play(m: Move, dir: Float = 1f, force: Boolean = false) {
         // One-shot priority prevents low-value events from interrupting an important reaction.
         if (!force && busy && m != Move.EXIT && prio(m) < prio(move)) return
+        OrangeDiag.log("move", "$move -> $m force=$force by ${OrangeDiag.caller()}")
         afterMove = null
         val now = SystemClock.uptimeMillis()
         capturePose()
@@ -327,6 +359,33 @@ class OrangeView(
     fun loop(moves: List<Move>, gapMs: Long) {
         loopMoves = moves; loopGap = gapMs; loopIdx = 0
         nextAt = SystemClock.uptimeMillis() + 700L
+    }
+
+    // ---- showcase / test hooks (they only drive this view; nothing touches the timer or saved data)
+    fun blinkNow() { if (blinkStart == 0L) blinkStart = SystemClock.uptimeMillis() }
+    fun petNow() { petAt = SystemClock.uptimeMillis(); petSide = 1f; petStrength = 1f; invalidate() }
+    /** Simulates a finger held on Orange: the ring fills over 4.5 s and the completion fires. */
+    fun previewHold() {
+        removeCallbacks(longPress)
+        val now = SystemClock.uptimeMillis()
+        touchHeld = true; longFired = false; dragged = false; downAt = now; holdStartedAt = now
+        postDelayed(longPress, 4500L)
+        postDelayed({ if (touchHeld && downAt == now) { touchHeld = false; holdStartedAt = 0L; longFired = false; invalidate() } }, 4900L)
+        invalidate()
+    }
+    /** Back to a clean idle: cancels every pending interaction and restores view opacity and scale. */
+    fun resetToIdle() {
+        removeCallbacks(longPress)
+        touchHeld = false; longFired = false; dragged = false; holdStartedAt = 0L; magicAt = 0L; petAt = 0L
+        loopMoves = null
+        animate().cancel(); alpha = 1f; scaleX = 1f; scaleY = 1f
+        say(null)
+        play(Move.IDLE, 1f, true)
+    }
+
+    override fun setVisibility(v: Int) {
+        if (v != visibility) OrangeDiag.log("vis", "$visibility -> $v from ${OrangeDiag.caller()}")
+        super.setVisibility(v)
     }
 
     // ---- lifecycle
@@ -624,25 +683,40 @@ class OrangeView(
                 return true
             }
             Move.DEAD -> {
-                // A staged collapse, not a permanently rotated still pose: recoil, lose balance,
-                // flop onto the side, then settle into a faint, slow breathing loop.
-                val recoil = (1f - exp(-10f * t)).coerceIn(0f, 1f)
-                val flop = sm(((t - 0.22f) / 0.72f).coerceIn(0f, 1f))
-                val settle = sm(((t - 0.94f) / 0.82f).coerceIn(0f, 1f))
-                val wobble = if (t < 1.8f) sin(t * 12f) * exp(-1.7f * t) else 0f
-                rot = (12f * recoil + 76f * flop - 76f * settle) + wobble * 7f
-                dy = s * (0.035f * recoil + 0.19f * flop + 0.025f * sin(t * 1.25f) * settle)
-                sx = 1f + 0.055f * flop - 0.025f * settle
-                sy = 1f - 0.18f * flop + 0.025f * sin(t * 1.25f) * settle
-                eyeOpenT = if (t < 0.58f) (1f - 0.92f * recoil) else 0.035f
-                pupilT = if (t < 0.58f) (1f - recoil) else 0f
-                mouthMode = 2
-                armL = 0.18f * (1f - flop) + 0.035f * abs(wobble)
-                armR = 0.26f * (1f - flop) + 0.035f * abs(wobble)
-                leafBiasT = -8f - 18f * flop
-                leafKick = 0.55f * (1f - settle) * abs(wobble)
-                blinkQuiet = 0.05f
-                return true
+                // Five beats: realise -> energy drains -> topples like a skittle -> lies there -> sits back up.
+                val total = 6.2f
+                fun eob(v: Float): Float { val u = v - 1f; return 1f + 2.4f * u * u * u + 1.4f * u * u }
+                val rotV: Float = when {
+                    t < 0.55f -> 3f * sin(t * 38f) * (1f - t / 0.55f)
+                    t < 1.45f -> { val u = (t - 0.55f) / 0.9f; 5f * u * sin(u * 6.9f) + 2f * u }
+                    t < 2.2f -> { val u = (t - 1.45f) / 0.75f; 5f + 79f * u.pow(2.2f) }
+                    t < 2.9f -> { val q = t - 2.2f; 84f - 7f * exp(-6f * q) * abs(sin(q * 11f)) }
+                    t < 4.9f -> 84f + 0.5f * sin(t * 1.3f)
+                    t < 6.2f -> { val u = (t - 4.9f) / 1.3f; if (u < 0.2f) 84f + 4f * sm(u / 0.2f) else 88f * (1f - eob(((u - 0.2f) / 0.8f).coerceIn(0f, 1f))) }
+                    else -> 0f
+                }
+                rot = rotV
+                val rr = Math.toRadians(rotV.toDouble()).toFloat()
+                slideX = -0.45f * s * sin(rr)
+                dy = s * 0.40f * sin(rr).coerceAtLeast(0f) + (if (t < 0.5f) s * 0.03f * bump(t, 0f, 0.5f) else 0f)
+                val landQ = (t - 2.2f).coerceAtLeast(0f)
+                if (t in 2.2f..3.4f) { val e = exp(-8f * landQ); sx = 1f + 0.10f * e; sy = 1f - 0.08f * e }
+                else if (t < 1.45f) { sy = 1f + 0.04f * bump(t, 0f, 0.55f) - 0.06f * sm(((t - 0.55f) / 0.9f).coerceIn(0f, 1f)) }
+                xEyes = if (t in 2.2f..4.95f) 1f else 0f
+                val drain = sm(((t - 0.55f) / 0.9f).coerceIn(0f, 1f))
+                val wake = sm(((t - 4.95f) / 0.5f).coerceIn(0f, 1f))
+                eyeOpenT = when {
+                    t < 0.55f -> 1.22f
+                    t < 2.2f -> 1.22f - 0.7f * drain
+                    t < 4.95f -> 1f
+                    else -> 0.12f + 0.88f * wake
+                }
+                pupilT = if (t < 0.55f) 0.5f else if (t < 2.2f) 0.5f - 0.2f * drain else 1f
+                mouthMode = if (t < 0.55f) 2 else if (t < 2.2f) 1 else if (t < 4.95f) 2 else 0
+                leafBiasT = -4f - 22f * drain
+                leafKick = if (t in 2.2f..3.0f) 1f else 0f
+                blinkQuiet = 0.02f
+                return t < total
             }
             Move.PANIC -> {
                 val pulse = sin(t * 15f); val fade = exp(-0.7f * t)
@@ -862,6 +936,24 @@ class OrangeView(
                 b[RigCh.FOOT_L_X] = -3f; b[RigCh.FOOT_R_X] = 3f
                 b[RigCh.LEG_L_ANKLE] = -6f; b[RigCh.LEG_R_ANKLE] = -6f
             }
+            Move.DEAD -> {
+                val drain = sm(((tt - 0.55f) / 0.9f).coerceIn(0f, 1f))
+                val lying = sm(((tt - 2.0f) / 0.4f).coerceIn(0f, 1f)) * (1f - sm(((tt - 4.9f) / 0.3f).coerceIn(0f, 1f)))
+                val jolt = bump(tt, 0f, 0.55f)
+                val flail = bump(tt, 1.45f, 2.3f)
+                b[RigCh.HEAD_Y] = -3f * jolt + 5f * drain
+                b[RigCh.HEAD_ROT] = 6f * drain + 8f * lying
+                // arms: flung up in shock, droop as the energy goes, flail on the way down, then flop
+                b[RigCh.ARM_L_SH] = 38f * jolt - 12f * drain + 30f * flail * sin(tt * 20f) - 20f * lying
+                b[RigCh.ARM_R_SH] = 38f * jolt - 12f * drain - 30f * flail * sin(tt * 20f + 1f) - 20f * lying
+                b[RigCh.ARM_L_WR] = -8f * lying; b[RigCh.ARM_R_WR] = -8f * lying
+                b[RigCh.LID_L_COVER] = 0.35f * drain * (1f - lying); b[RigCh.LID_R_COVER] = 0.35f * drain * (1f - lying)
+                b[RigCh.LID_L_TILT] = -0.7f * drain; b[RigCh.LID_R_TILT] = -0.7f * drain
+                b[RigCh.MOUTH_SMILE] = -0.9f * drain
+                b[RigCh.FOOT_L_LIFT] = 5f * flail; b[RigCh.FOOT_R_LIFT] = 3f * flail
+                b[RigCh.FOOT_L_X] = -4f * lying; b[RigCh.FOOT_R_X] = 4f * lying
+                b[RigCh.LEG_L_ANKLE] = -12f * lying; b[RigCh.LEG_R_ANKLE] = 14f * lying
+            }
             Move.WAKE, Move.STRETCH -> {
                 val w2 = if (move == Move.WAKE) tt else tt + 1.0f
                 // starts as the sleeping pose and releases it
@@ -942,6 +1034,20 @@ class OrangeView(
             if (petSide < 0f) { a[RigCh.ARM_L_SH] += 18f * petPulse; a[RigCh.ARM_L_WR] += 8f * petPulse }
             else { a[RigCh.ARM_R_SH] += 18f * petPulse; a[RigCh.ARM_R_WR] += 8f * petPulse }
             a[RigCh.MOUTH_SMILE] += 0.6f * petPulse
+        }
+        if (holdShown > 0f) {
+            val hs = holdShown
+            a[RigCh.ARM_L_SH] += 10f * hs; a[RigCh.ARM_R_SH] += 10f * hs
+            a[RigCh.LID_L_COVER] += 0.10f * hs; a[RigCh.LID_R_COVER] += 0.10f * hs
+            a[RigCh.HEAD_Y] += 1.5f * hs
+        }
+        if (magicAt != 0L) {
+            val ca = (now - magicAt) / 1000f
+            val up = bump(ca, 0.1f, 0.9f)
+            a[RigCh.ARM_L_SH] += 96f * up; a[RigCh.ARM_R_SH] += 96f * up
+            a[RigCh.ARM_L_EL] += 10f * up; a[RigCh.ARM_R_EL] += 10f * up
+            a[RigCh.HEAD_ROT] += -5f * up
+            a[RigCh.FOOT_L_LIFT] += 4f * up; a[RigCh.FOOT_R_LIFT] += 4f * up
         }
         if (touchHeld) {
             // the finger is on him: eyes and head follow it
@@ -1045,7 +1151,11 @@ class OrangeView(
         c.save()
         c.translate(tx, ty)
         c.rotate(rg[RigCh.HEAD_ROT] * headWeight(e[1]))
-        if (happy > 0.5f || op < 0.2f) {
+        if (xEyes > 0.5f) {
+            c.scale(k * sx, k * sy)
+            xPaint.strokeWidth = 11f
+            c.drawLine(-27f, -27f, 27f, 27f, xPaint); c.drawLine(27f, -27f, -27f, 27f, xPaint)
+        } else if (happy > 0.5f || op < 0.2f) {
             // closed eye: a soft arc (happy = upward, blink/sleepy = downward)
             c.scale(k * sx, k * sy)
             val w = white.bmp.width * 0.55f; val h = white.bmp.height * 0.2f
@@ -1100,6 +1210,14 @@ class OrangeView(
             c.scale(o, (if (mouthMode == 2) 0.85f else 1f) * mouthY * rig[RigCh.MOUTH_OPEN])
             c.drawBitmap(m.bmp, m.x - OrangeArt.mouthCx, m.y - OrangeArt.mouthCy, paint)
         }
+        if (xEyes > 0.5f) {
+            // tongue lolling out of the open mouth, swaying with the slow breathing
+            val sway = 3f * sin(SystemClock.uptimeMillis() / 700.0).toFloat()
+            c.drawRoundRect(-13f + sway * 0.4f, 6f, 13f + sway * 0.4f, 40f + sway, 12f, 12f, tonguePaint)
+            xPaint.strokeWidth = 2.5f; xPaint.color = 0xFFD9566A.toInt()
+            c.drawLine(sway * 0.4f, 12f, sway * 0.4f, 30f + sway * 0.6f, xPaint)
+            xPaint.color = 0xFF4A2410.toInt()
+        }
         c.restore()
     }
 
@@ -1129,23 +1247,23 @@ class OrangeView(
                 fx.color = 0xFF70C9F5.toInt(); c.drawOval(cx0+s*.32f, dropY, cx0+s*.39f, dropY+s*.13f, fx)
             }
             Move.DEAD -> {
-                // Coffin frame and a small, softly rising spirit. The mascot remains visible inside it.
-                val l = cx0 - s*.49f; val r = cx0 + s*.49f; val y = bottom - s*.43f
-                stroke.color = 0xFF858A91.toInt(); stroke.strokeWidth = s*.045f
-                val coffin = Path().apply { moveTo(l+s*.12f,y-s*.24f); lineTo(l+s*.30f,y-s*.37f); lineTo(r-s*.30f,y-s*.37f); lineTo(r-s*.12f,y-s*.24f); lineTo(r,y+s*.22f); lineTo(l,y+s*.22f); close() }
-                c.drawPath(coffin, stroke)
-                stroke.color = 0xFFB9BEC5.toInt(); stroke.strokeWidth = s*.018f
-                c.drawLine(l+s*.13f,y+s*.10f,r-s*.13f,y+s*.10f,stroke)
-                // Crossed-out eyes are a clear, readable dead-state cue.
-                stroke.color = 0xFF5A3829.toInt(); stroke.strokeWidth = s*.035f
-                for (side in -1..1 step 2) {
-                    val ex = cx0 + side*s*.20f; val ey = top+s*.40f
-                    c.drawLine(ex-s*.045f,ey-s*.045f,ex+s*.045f,ey+s*.045f,stroke)
-                    c.drawLine(ex+s*.045f,ey-s*.045f,ex-s*.045f,ey+s*.045f,stroke)
+                // A small spirit wisp leaves the head while Orange lies there; it stays upright whatever the body does.
+                if (t > 2.4f && t < 5.0f) {
+                    val env = sm(((t - 2.4f) / 0.5f).coerceIn(0f, 1f)) * (1f - sm(((t - 4.5f) / 0.5f).coerceIn(0f, 1f)))
+                    c.save(); c.rotate(-rot, cx0, feet)
+                    val p = (((t - 2.4f) / 2.1f) % 1f + 1f) % 1f
+                    val wx = cx0 + s * 0.36f + sin(p * 6.0f) * s * 0.035f
+                    val wy = feet - s * (0.50f + 0.40f * p)
+                    val a = (sin(Math.PI * p).toFloat() * 0.85f * env)
+                    fx.color = 0xFFEAF4FF.toInt(); fx.alpha = (230f * a).toInt().coerceIn(0, 255)
+                    c.drawOval(wx - s * 0.055f, wy - s * 0.075f, wx + s * 0.055f, wy + s * 0.07f, fx)
+                    val tail = Path().apply { moveTo(wx - s * 0.04f, wy + s * 0.05f); quadTo(wx - s * 0.02f, wy + s * 0.14f, wx + s * 0.03f, wy + s * 0.17f); quadTo(wx + s * 0.02f, wy + s * 0.11f, wx + s * 0.045f, wy + s * 0.05f); close() }
+                    c.drawPath(tail, fx)
+                    fx.color = 0xFF7D8FA3.toInt(); fx.alpha = (200f * a).toInt().coerceIn(0, 255)
+                    c.drawCircle(wx - s * 0.02f, wy - s * 0.01f, s * 0.009f, fx); c.drawCircle(wx + s * 0.022f, wy - s * 0.01f, s * 0.009f, fx)
+                    fx.alpha = 255
+                    c.restore()
                 }
-                val soulY = top - s * (0.08f + 0.13f * (0.5f + 0.5f*sin(phase*2.2f)))
-                fx.color = 0xFFEAF7FF.toInt(); c.drawOval(cx0-s*.12f,soulY,cx0+s*.12f,soulY+s*.19f,fx)
-                fx.color = 0xFF8D9BA8.toInt(); c.drawCircle(cx0-s*.045f,soulY+s*.08f,s*.012f,fx); c.drawCircle(cx0+s*.045f,soulY+s*.08f,s*.012f,fx)
             }
             Move.PANIC -> {
                 stroke.color = 0xFF73BFEF.toInt(); stroke.strokeWidth = s*.025f
@@ -1233,6 +1351,20 @@ class OrangeView(
         val dt = if (lastFrame == 0L) 0.016f else ((now - lastFrame) / 1000f).coerceIn(0.001f, 0.05f)
         lastFrame = now
 
+        // opacity / scale watchdog: log every change, and repair a value that has been stuck for 1.5 s
+        run {
+            val va = alpha; val vs = scaleX
+            if (abs(va - fxLastA) > 0.001f || abs(vs - fxLastS) > 0.001f) {
+                if (va < 0.999f || vs < 0.999f || fxLastA < 0.999f || fxLastS < 0.999f)
+                    OrangeDiag.log("viewfx", String.format(java.util.Locale.US, "alpha %.2f->%.2f scale %.2f->%.2f move=%s", fxLastA, va, fxLastS, vs, move))
+                fxLastA = va; fxLastS = vs; fxSince = now
+            } else if ((va < 0.995f || abs(vs - 1f) > 0.005f) && fxSince != 0L && now - fxSince > 1500L && move != Move.ENTER && move != Move.EXIT) {
+                OrangeDiag.log("HEAL", String.format(java.util.Locale.US, "stuck alpha=%.2f scale=%.2f move=%s", va, vs, move))
+                alpha = 1f; scaleX = 1f; scaleY = 1f
+                fxLastA = 1f; fxLastS = 1f; fxSince = now
+            }
+        }
+        xEyes = 0f; slideX = 0f
         var t = (now - t0) / 1000f * spd
         val running = pose(t)
         // Smooth press-in / release-out response. The critically damped approach is frame-rate
@@ -1244,6 +1376,25 @@ class OrangeView(
         sy -= 0.055f * pressPulse
         dy += s * 0.012f * pressPulse
         blendPose(now)
+        // The hold builds anticipation: Orange crouches a little as the ring fills.
+        run {
+            val tgt = if (touchHeld && !longFired && holdStartedAt != 0L) ((now - holdStartedAt) / 4500f).coerceIn(0f, 1f) else 0f
+            holdShown = if (tgt >= holdShown) tgt else { val v = holdShown * exp(-14.0 * dt).toFloat(); if (v < 0.003f) 0f else v }
+            sy -= 0.045f * holdShown; sx += 0.028f * holdShown
+        }
+        // Completion: a visible little celebration on top of whatever Orange is doing (works in every state).
+        if (magicAt != 0L) {
+            val ca = (now - magicAt) / 1000f
+            if (ca < 1.0f) {
+                when {
+                    ca < 0.16f -> { val u = sm(ca / 0.16f); sy -= 0.12f * u; sx += 0.07f * u }
+                    ca < 0.66f -> { val u = (ca - 0.16f) / 0.5f; dy += s * 0.24f * 4f * u * (1f - u); sy += 0.07f * sin(Math.PI * u).toFloat(); sx -= 0.04f * sin(Math.PI * u).toFloat() }
+                    else -> { val q = ca - 0.66f; val e = exp(-7.0 * q).toFloat() * cos(18.0 * q).toFloat(); sy -= 0.10f * e; sx += 0.06f * e }
+                }
+                happyT = max(happyT, bump(ca, 0.05f, 0.85f))
+                leafKick = max(leafKick, 0.9f * bump(ca, 0.1f, 0.8f))
+            }
+        }
         // A pet is a cross-state additive reaction: it remains visible during idle, focus,
         // break and scenario performances without replacing their choreography.
         val petAge = if (petAt == 0L) 2f else ((now - petAt) / 1000f).coerceAtLeast(0f)
@@ -1259,6 +1410,7 @@ class OrangeView(
         }
         if (!running && move == Move.EXIT) {
             busy = false
+            if (now - t0 > 2500L) { OrangeDiag.log("EXIT", "finished exit still on screen -> idle by ${OrangeDiag.caller()}"); play(Move.IDLE, 1f, true) }
         } else if (!running) {
             // finished: back to idle (picked up by the loop, if any)
             val nm = afterMove ?: Move.IDLE
@@ -1315,7 +1467,7 @@ class OrangeView(
         if (move != Move.ENTER && move != Move.EXIT) c.drawOval(rect, shadow)
 
         c.save()
-        c.translate(0f, -dy)
+        c.translate(slideX, -dy)
         c.rotate(rot, cx, feet)
 
         // body mesh
@@ -1391,6 +1543,7 @@ class OrangeView(
             c.translate(cx, feet)
             c.scale(overallScale, overallScale)
             c.translate(-cx, -feet - overallLift - dy)
+            c.translate(slideX, 0f)
             c.rotate(rot, cx, feet)
             drawScenarioEffects(c, now, t)
             c.restore()
@@ -1398,10 +1551,6 @@ class OrangeView(
 
         // Long-press magic: a small, soft aurora halo with drifting sprinkles. It is deliberately
         // restrained and follows the app theme (sage in light mode, warm orange in dark mode).
-        run {
-            val tgt = if (touchHeld && !longFired && holdStartedAt != 0L) ((now - holdStartedAt) / 4500f).coerceIn(0f, 1f) else 0f
-            holdShown = if (tgt >= holdShown) tgt else { val v = holdShown * exp(-14.0 * dt).toFloat(); if (v < 0.003f) 0f else v }
-        }
         drawZzz(c, dt)
         drawLongPressMagic(c, now)
 
@@ -1446,55 +1595,85 @@ class OrangeView(
         }
     }
 
-    /** The hold ring: a thin warm-orange arc that fills continuously over exactly 4.5 s around Orange. */
-    private fun drawHoldProgress(c: Canvas, now: Long) {
-        if (holdShown <= 0.004f) return
-        val holding = touchHeld && !longFired && holdStartedAt != 0L
-        val fade = if (holding) ((now - holdStartedAt) / 220f).coerceIn(0f, 1f) else (holdShown * 8f).coerceIn(0f, 1f)
-        if (fade <= 0f) return
-        val color = if (dark) Color.rgb(255, 168, 82) else Color.rgb(234, 120, 28)
-        val centerX = cx; val centerY = mTop + s * 0.47f
-        val rad = s * 0.47f
-        magicRing.strokeWidth = 2.1f * d
-        magicRing.color = color; magicRing.alpha = (46 * fade).toInt()
-        c.drawCircle(centerX, centerY, rad, magicRing)
-        magicRing.alpha = (240 * fade).toInt()
-        rect.set(centerX - rad, centerY - rad, centerX + rad, centerY + rad)
-        c.drawArc(rect, -90f, 360f * holdShown, false, magicRing)
-        // a small bright bead rides the end of the arc
-        val ang = (-Math.PI / 2.0 + 2.0 * Math.PI * holdShown).toFloat()
-        magicDot.color = Color.rgb(255, 214, 160); magicDot.alpha = (255 * fade).toInt()
-        c.drawCircle(centerX + cos(ang) * rad, centerY + sin(ang) * rad, 2.3f * d, magicDot)
+    /** One rounded silhouette that hugs the whole character (leaf to feet, arm tip to arm tip) with even spacing. */
+    private fun buildRing() {
+        val ex = 2.0 / 2.6
+        val cX = mLeft + 329f * k; val cY = mTop + 321f * k
+        val a = 345f * k; val b = 357f * k
+        ringPath.reset()
+        val n = 144
+        for (i in 0..n) {
+            val th = 2.0 * Math.PI * i / n
+            val sn = sin(th); val cs = cos(th)
+            val x = cX + a * (if (sn < 0) -1 else 1) * Math.pow(abs(sn), ex).toFloat()
+            val y = cY - b * (if (cs < 0) -1 else 1) * Math.pow(abs(cs), ex).toFloat()
+            if (i == 0) ringPath.moveTo(x, y) else ringPath.lineTo(x, y)
+        }
+        ringPath.close()
+        ringMeasure.setPath(ringPath, false)
+        ringLen = ringMeasure.length
+        ringBuilt = true
     }
 
-    /** Completion: one soft ring pulse and a few sparkles. Everything stays inside the view so nothing is clipped. */
+    private fun ringColor() = if (dark) Color.rgb(255, 170, 84) else Color.rgb(232, 118, 26)
+
+    /** The hold ring: a thin warm-orange arc around the whole silhouette that fills continuously over exactly 4.5 s. */
+    private fun drawHoldProgress(c: Canvas, now: Long) {
+        if (holdShown <= 0.003f) return
+        if (!ringBuilt) buildRing()
+        val holding = touchHeld && !longFired && holdStartedAt != 0L
+        val fade = if (holding) ((now - holdStartedAt) / 120f).coerceIn(0f, 1f) else (holdShown * 8f).coerceIn(0f, 1f)
+        if (fade <= 0f) return
+        val color = ringColor()
+        magicRing.color = color; magicRing.strokeWidth = 2.0f * d
+        magicRing.alpha = (44 * fade).toInt()
+        c.drawPath(ringPath, magicRing)
+        ringSeg.rewind()
+        ringMeasure.getSegment(0f, ringLen * holdShown, ringSeg, true)
+        magicRing.alpha = (245 * fade).toInt()
+        c.drawPath(ringSeg, magicRing)
+        // a bright bead with a soft halo rides the end of the arc
+        ringMeasure.getPosTan(ringLen * holdShown, ringPos, null)
+        magicDot.color = color; magicDot.alpha = (70 * fade).toInt()
+        c.drawCircle(ringPos[0], ringPos[1], 5.2f * d, magicDot)
+        magicDot.color = Color.rgb(255, 232, 200); magicDot.alpha = (255 * fade).toInt()
+        c.drawCircle(ringPos[0], ringPos[1], 2.3f * d, magicDot)
+    }
+
+    /** Completion: the ring flashes full, breathes outward and fades; sparkles lift off it. Nothing leaves the view. */
     private fun drawLongPressMagic(c: Canvas, now: Long) {
         drawHoldProgress(c, now)
         if (magicAt == 0L) return
         val age = (now - magicAt) / 1000f
-        if (age >= 1.25f) { magicAt = 0L; return }
-        val color = if (dark) Color.rgb(255, 168, 82) else Color.rgb(234, 120, 28)
-        val centerX = cx; val centerY = mTop + s * 0.47f
-        val e = sm((age / 0.55f).coerceIn(0f, 1f))
-        val envelope = (1f - ((age - 0.25f) / 1.0f).coerceIn(0f, 1f))
-        // the full ring flashes bright, then breathes out and fades
-        magicRing.color = color; magicRing.strokeWidth = (2.1f - 0.9f * e) * d
-        magicRing.alpha = (235 * envelope).toInt()
-        c.drawCircle(centerX, centerY, s * (0.47f + 0.03f * e), magicRing)
-        val bottom = mTop + s * 0.99f
-        for (i in 0 until 8) {
-            val a = (i * Math.PI / 4.0 + 0.4).toFloat()
-            val travel = sm(((age - 0.05f - (i % 2) * 0.05f) / 0.8f).coerceIn(0f, 1f))
-            val rr = s * (0.47f + 0.16f * travel)
-            val x = centerX + cos(a) * rr
-            val y = centerY + sin(a) * rr - s * 0.03f * travel
-            if (y > bottom) continue
+        if (age >= 1.3f) { magicAt = 0L; return }
+        if (!ringBuilt) buildRing()
+        val color = ringColor()
+        val e = sm((age / 0.6f).coerceIn(0f, 1f))
+        val envelope = (1f - ((age - 0.3f) / 1.0f).coerceIn(0f, 1f))
+        val cX = mLeft + 329f * k; val cY = mTop + 321f * k
+        c.save()
+        val sc = 1f + 0.022f * e
+        c.scale(sc, sc, cX, cY)
+        magicRing.color = color; magicRing.strokeWidth = (2.6f - 1.2f * e) * d
+        magicRing.alpha = (240 * envelope).toInt()
+        c.drawPath(ringPath, magicRing)
+        c.restore()
+        val limit = mTop + s * 1.06f
+        for (i in 0 until 12) {
+            val travel = sm(((age - 0.04f - (i % 3) * 0.05f) / 0.85f).coerceIn(0f, 1f))
+            ringMeasure.getPosTan(ringLen * (i / 12f), ringPos, null)
+            var dx = ringPos[0] - cX; var dy2 = ringPos[1] - cY
+            val len = hypot(dx, dy2).coerceAtLeast(1f); dx /= len; dy2 /= len
+            val x = ringPos[0] + dx * s * 0.07f * travel
+            val y = ringPos[1] + dy2 * s * 0.07f * travel - s * 0.025f * travel
+            if (y > limit) continue
             val tw = 0.65f + 0.35f * sin(age * 18f + i)
-            magicDot.color = color; magicDot.alpha = (230f * envelope * (1f - travel * 0.5f) * tw).toInt().coerceIn(0, 255)
-            val r = d * (1.2f + (i % 3) * 0.5f)
+            magicDot.color = color
+            magicDot.alpha = (240f * envelope * (1f - travel * 0.55f) * tw).toInt().coerceIn(0, 255)
+            val r = d * (1.1f + (i % 3) * 0.55f)
             if (i % 2 == 0) {
                 c.save(); c.translate(x, y); c.rotate(45f)
-                c.drawRoundRect(-r, -r, r, r, r * 0.35f, r * 0.35f, magicDot); c.restore()
+                c.drawRoundRect(-r, -r, r, r, r * 0.3f, r * 0.3f, magicDot); c.restore()
             } else c.drawCircle(x, y, r, magicDot)
         }
     }
