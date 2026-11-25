@@ -45,7 +45,8 @@ class RollPainter(private val host: View) {
     private val prevC = arrayOfNulls<Char>(24)
     private val curC = arrayOfNulls<Char>(24)
     private val start = LongArray(24)
-    private val dur = 520L
+    // Short and restrained: a long roll with both digits half-visible at once is what read as ghosting on a 1 s countdown.
+    private val dur = 300L
     private var active = false
 
     fun set(text: String, animate: Boolean) {
@@ -59,7 +60,7 @@ class RollPainter(private val host: View) {
             if (o != c) {
                 prevC[k] = o
                 curC[k] = c
-                start[k] = if (animate) now + k * 35L else now - dur
+                start[k] = if (animate) now + k * 20L else now - dur
             } else if (!(animate && start[k] + dur > now)) {
                 prevC[k] = null
                 curC[k] = c
@@ -88,7 +89,7 @@ class RollPainter(private val host: View) {
             total += widths[i]
         }
         val now = SystemClock.uptimeMillis()
-        val travel = paint.textSize * 0.34f
+        val travel = paint.textSize * 0.2f
         val baseAlpha = paint.alpha
         var x = cx - total / 2f
         var still = true
@@ -101,13 +102,16 @@ class RollPainter(private val host: View) {
             val q = curC[k] ?: cur[cur.length - n + i]
             if (t < 1f) {
                 still = false
-                val e = easeOutBack(t)
-                val o = t * t
-                if (p != null) {
-                    paint.alpha = (baseAlpha * 0.24f * (1f - o)).toInt()
-                    c.drawText(p.toString(), mid, baseline - o * travel, paint)
+                // the old digit is gone by the middle of the move and the new one only starts to appear before that,
+                // so the two never sit on top of each other at any real strength; no overshoot, no bounce
+                val e = 1f - (1f - t) * (1f - t) * (1f - t)
+                val outA = (1f - t / 0.45f).coerceIn(0f, 1f)
+                val inA = ((t - 0.25f) / 0.75f).coerceIn(0f, 1f)
+                if (p != null && outA > 0f) {
+                    paint.alpha = (baseAlpha * outA * outA).toInt()
+                    c.drawText(p.toString(), mid, baseline - t * travel, paint)
                 }
-                paint.alpha = (baseAlpha * (0.18f + 0.82f * t.coerceIn(0f, 1f))).toInt()
+                paint.alpha = (baseAlpha * inA).toInt()
                 c.drawText(q.toString(), mid, baseline + (1f - e) * travel, paint)
                 paint.alpha = baseAlpha
             } else {

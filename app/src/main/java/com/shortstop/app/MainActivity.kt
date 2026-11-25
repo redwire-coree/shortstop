@@ -464,6 +464,7 @@ class MainActivity : Activity() {
     }
 
     override fun onResume() {
+        clearBlurEffects()
         super.onResume()
         Store.finalizeFocus(this)
         window.decorView.postDelayed({ maybeNudge() }, 6000L)
@@ -1051,7 +1052,9 @@ class MainActivity : Activity() {
         closeSheet(false)
         val layer = FrameLayout(this)
         // blur what is behind the sheet (the real views, not the toast or sparkle layers), then dim it only gently
+        clearBlurEffects()
         val blurTargets = (0 until rootFrame.childCount).map { rootFrame.getChildAt(it) }
+            .filter { v -> v.tag != "closing-sheet" }
             .filter { v -> (v as Any) !== (toaster as Any?) && (v as Any) !== (spark as Any?) && (v as Any) !== (sheetLayer as Any?) }
         val scrim = SheetBackdrop(this, blurTargets, 0x59140A04, rootFrame).apply {
             setOnClickListener { closeSheet() }
@@ -1115,6 +1118,12 @@ class MainActivity : Activity() {
         sheetClose = onClose
     }
 
+    /** No leftover blur on any screen view when no sheet owns it (a safety net for every close path). */
+    private fun clearBlurEffects() {
+        if (android.os.Build.VERSION.SDK_INT >= 31 && sheetScrim == null)
+            for (i in 0 until rootFrame.childCount) rootFrame.getChildAt(i).setRenderEffect(null)
+    }
+
     private fun fadeBackdrop(b: SheetBackdrop, to: Float, ms: Long) {
         (b.tag as? ValueAnimator)?.cancel()
         b.tag = ValueAnimator.ofFloat(b.level, to).apply {
@@ -1142,6 +1151,7 @@ class MainActivity : Activity() {
         sheetScrim = null
         sheetClose = null
         setSheetDim(0f)
+        layer.tag = "closing-sheet"
         if (!animate || panel == null || scrim == null) {
             scrim?.release()
             rootFrame.removeView(layer)
@@ -1149,7 +1159,8 @@ class MainActivity : Activity() {
         }
         fadeBackdrop(scrim, 0f, 240L)
         panel.animate().translationY(dp(700).toFloat()).setDuration(240).withEndAction {
-            scrim.release()
+            // if another sheet already opened, the blur now belongs to it: only remove our own layer
+            scrim.release(sheetScrim == null)
             rootFrame.removeView(layer)
             cb?.invoke()
         }.start()
@@ -1378,10 +1389,11 @@ class MainActivity : Activity() {
         runWrap.addView(SoftClouds(this, pal.dark), FrameLayout.LayoutParams(matchP, matchP))
         runWrap.addView(run, FrameLayout.LayoutParams(matchP, wrapC))
         // one quiet Orange lives in the card's top-right corner for the whole session (not tappable)
-        calmOrange = OrangeView(this, fonts, pal.dark, 52f).apply { interactive = true; wakeTo = Move.BREAK;
+        calmOrange = OrangeView(this, fonts, pal.dark, 46f).apply { interactive = true; bubbleBelow = true; wakeTo = Move.BREAK;
             onWoke = { postDelayed({ if (isAttachedToWindow && Store.focusRunning(this@MainActivity) && Store.onBreak(this@MainActivity)) play(Move.SLEEP, 1f, true) }, 9000L) }; isClickable = true; contentDescription = "Orange focus companion. Tap, pet, or hold for magic."; visibility = View.GONE }
         runWrap.addView(calmOrange, FrameLayout.LayoutParams(wrapC, wrapC, Gravity.TOP or Gravity.END).apply {
-            topMargin = dp(62); marginEnd = dp(8)
+            // beside the status pill, well above the dial: the ring, aurora and speech box never reach the timer
+            topMargin = -dp(5); marginEnd = dp(8)
         })
         // OrangeView keeps a wide canvas for speech bubbles; offset that canvas so the
         // mascot itself—not the empty bubble lane—sits in the card's top-right corner.

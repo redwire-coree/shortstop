@@ -116,6 +116,7 @@ class OrangeBubble(
     var cat: LineCat = LineCat.IDLE; private set
     var current: String = ""; private set
     var onTapBubble: (() -> Unit)? = null
+    var preferBelow = false
 
     private val autoHide = Runnable { hide() }
     private val pre = ViewTreeObserver.OnPreDrawListener {
@@ -270,6 +271,7 @@ class OrangeBubble(
         val availR = sw - margin - (br + gap) - tailLen
         val availL = bl - gap - margin - tailLen
         val side = when {
+            preferBelow -> Side.BELOW
             availR >= 200f * d -> Side.RIGHT
             availL >= 200f * d -> Side.LEFT
             max(availR, availL) >= minBox -> if (availR >= availL) Side.RIGHT else Side.LEFT
@@ -325,7 +327,7 @@ class OrangeBubble(
                 vx = (cx - vw / 2f)
                 tipRelA = (cx - vx).coerceIn(18f * d, max(18f * d, bw - 18f * d))
                 val above = bt - gap - vh
-                if (above >= topLimit) { side = Side.ABOVE; vy = above } else { side = Side.BELOW; vy = bb + gap }
+                if (above >= topLimit && !preferBelow) { side = Side.ABOVE; vy = above } else { side = Side.BELOW; vy = bb + gap }
             }
         }
         vx = vx.coerceIn(margin, max(margin, sw - margin - vw))

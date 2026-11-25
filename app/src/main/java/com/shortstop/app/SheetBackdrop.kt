@@ -72,14 +72,14 @@ class SheetBackdrop(ctx: Context, private val targets: List<View>, private val t
     }
 
     /** Gives the real views back: no blur effect is left on anything, whatever path closed the sheet. */
-    fun release() {
-        if (live) for (t in targets) t.setRenderEffect(null)
+    fun release(clearEffects: Boolean = true) {
+        if (live && clearEffects) for (t in targets) t.setRenderEffect(null)
         lastR = -1f
         snap?.recycle(); snap = null
     }
 
     override fun onDetachedFromWindow() {
-        release()
+        release(false)
         super.onDetachedFromWindow()
     }
 }

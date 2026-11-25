@@ -120,7 +120,8 @@ class OrangeView(
     /** Extra drawing room to the left: the Aurora reaches about 0.09 x Orange's size past the old left edge and was cut off there. */
     private val padL = s * 0.32f
     private val mLeft = s * 0.12f + padL
-    private val mTop = vh - s * 0.07f - s
+    // 0.12 s below the body is reserved for the hold ring and the aurora, so neither is ever cut off by this view's bounds
+    private val mTop = vh - s * 0.12f - s
     private val feet = mTop + s * 634f / 640f
     private val cx = mLeft + s / 2f
 
@@ -274,6 +275,8 @@ class OrangeView(
     private var sayToken = 0
     /** Lets an owner say what Orange's lines are about when the move alone does not tell (e.g. the schedule card). */
     var lineCat: (() -> LineCat?)? = null
+    /** True for an Orange whose speech box should sit below him (the focus card, where the sides hold the timer). */
+    var bubbleBelow = false
 
     private val longPress = Runnable {
         // fires at most once per press: longFired is set first and every later path checks it
@@ -305,6 +308,7 @@ class OrangeView(
         if (t == null) { bubble?.hide(); return }
         if (!isAttachedToWindow) { post { if (isAttachedToWindow) say(t, ms, cat) }; return }
         val b = bubble ?: OrangeBubble(context, this, dark, fonts.semi, FocusTheme.title(dark)).also { nb ->
+            nb.preferBelow = bubbleBelow
             nb.onTapBubble = { onBubbleTapped() }
             bubble = nb
         }
@@ -1640,7 +1644,7 @@ class OrangeView(
         val ex = 2.0 / 2.6
         val cX = mLeft + 329f * k; val cY = mTop + 321f * k
         // body silhouette radius + a deliberate gap, so the ring floats around Orange instead of hugging or touching him
-        val a = 392f * k; val b = 404f * k
+        val a = 372f * k; val b = 364f * k
         ringPath.reset()
         val n = 144
         for (i in 0..n) {
@@ -1687,8 +1691,8 @@ class OrangeView(
     private val auroraM = Matrix()
     private var glowShader: RadialGradient? = null
     private val ribbonShader = arrayOfNulls<SweepGradient>(3)
-    private val ribRx = floatArrayOf(0.66f, 0.60f, 0.70f)
-    private val ribRy = floatArrayOf(0.47f, 0.43f, 0.49f)
+    private val ribRx = floatArrayOf(0.58f, 0.54f, 0.60f)
+    private val ribRy = floatArrayOf(0.45f, 0.42f, 0.47f)
     private val ribTilt = floatArrayOf(-12f, 16f, 4f)
     private val ribWidth = floatArrayOf(7f, 5f, 3.2f)
     private val ribSpeed = floatArrayOf(52f, -68f, 36f)   // degrees per second
