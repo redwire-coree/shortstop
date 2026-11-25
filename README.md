@@ -2,7 +2,7 @@
 
 Blocks YouTube Shorts, Instagram Reels, Facebook Reels, TikTok, Snapchat Spotlight, X video, LinkedIn video, Pinterest and Reddit video using an Android Accessibility Service.
 When a Short or Reel player appears, Shortstop presses Back for you (Home if Back keeps landing in the feed;
-TikTok is sent straight Home). No dependencies, no internet permission, nothing leaves the phone.
+TikTok is sent straight Home). No third-party dependencies. The app declares the Internet permission only so the Blocks screen can fetch website icons (favicons); your usage data, sessions and settings never leave the phone.
 
 ## Build the APK
 **Android Studio (easiest)**

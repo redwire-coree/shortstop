@@ -1111,7 +1111,10 @@ class OrangeView(
             val p = L[if (n == 0) "patchL" else "patchR"] ?: continue
             val sh = if (n == 0) r[RigCh.ARM_L_SH] else r[RigCh.ARM_R_SH]
             val el = if (n == 0) r[RigCh.ARM_L_EL] else r[RigCh.ARM_R_EL]
-            val a = (1f - (abs(sh) / 9f + abs(el) / 22f)).coerceIn(0f, 1f)
+            // The patch sits under the arm and only needs to leave when the arm swings far from rest.
+            // (It used to vanish within 9 degrees, so every tap made the body's corners flicker out.)
+            val swing = abs(sh) + 0.5f * abs(el)
+            val a = 1f - sm(((swing - 22f) / 26f).coerceIn(0f, 1f))
             if (a < 0.02f) continue
             var i = 0
             for (rr in 0..4) for (col in 0..6) {
@@ -1478,6 +1481,7 @@ class OrangeView(
                 verts[i++] = tx; verts[i++] = ty
             }
         }
+        drawAuroraBack(c, SystemClock.uptimeMillis())
         if (armMeshL != null) drawRigLegs(c)
         c.drawBitmapMesh(base.bmp, gridC, gridR, verts, 0, null, 0, paint)
         if (armMeshL != null) drawRigPatches(c)
@@ -1584,7 +1588,7 @@ class OrangeView(
         // schedule the next frame: full speed only while something is actually moving
         if (attached && winVisible && isShown) {
             val petAnimating = petAt != 0L && now - petAt < 950L
-            val magicAnimating = magicAt != 0L && now - magicAt < 2600L
+            val magicAnimating = magicAt != 0L && now - magicAt < 3700L
             val ambientLoop = move == Move.FOCUS || move == Move.BREAK || move == Move.SLEEP || move == Move.IDLE ||
                 move == Move.BEGGING || move == Move.DEAD || move == Move.PANIC || move == Move.CRYING ||
                 move == Move.FINAL_BOSS || move == Move.OVERLOAD || move == Move.VICTORY
@@ -1640,41 +1644,133 @@ class OrangeView(
         c.drawCircle(ringPos[0], ringPos[1], 2.3f * d, magicDot)
     }
 
-    /** Completion: the ring flashes full, breathes outward and fades; sparkles lift off it. Nothing leaves the view. */
+    // ---- Aurora: the reward for a completed 4.5 s hold. Everything is drawn from elapsed time with reused objects.
+    private val auroraStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val auroraM = Matrix()
+    private var glowShader: RadialGradient? = null
+    private val ribbonShader = arrayOfNulls<SweepGradient>(3)
+    private val ribRx = floatArrayOf(0.66f, 0.60f, 0.70f)
+    private val ribRy = floatArrayOf(0.47f, 0.43f, 0.49f)
+    private val ribTilt = floatArrayOf(-12f, 16f, 4f)
+    private val ribWidth = floatArrayOf(7f, 5f, 3.2f)
+    private val ribSpeed = floatArrayOf(52f, -68f, 36f)   // degrees per second
+    private val ringRx = floatArrayOf(0.62f, 0.52f, 0.69f)
+    private val ringRy = floatArrayOf(0.46f, 0.38f, 0.49f)
+    private val particleCount = 18
+
+    /** Theme palettes: light = sage and soft green, dark = orange, amber and gold. */
+    private fun auroraCol(i: Int): Int = if (dark) when (i) { 0 -> Color.rgb(255, 146, 54); 1 -> Color.rgb(255, 196, 84); else -> Color.rgb(255, 224, 148) }
+        else when (i) { 0 -> Color.rgb(104, 168, 118); 1 -> Color.rgb(70, 160, 108); else -> Color.rgb(170, 214, 150) }
+
+    private fun buildAurora() {
+        val cX = mLeft + 329f * k; val cY = mTop + 321f * k
+        val g = auroraCol(0)
+        glowShader = RadialGradient(cX, cY, s * 0.56f, intArrayOf(Color.argb(150, Color.red(g), Color.green(g), Color.blue(g)), Color.argb(60, Color.red(g), Color.green(g), Color.blue(g)), Color.argb(0, Color.red(g), Color.green(g), Color.blue(g))), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+        for (i in 0..2) {
+            val c1 = auroraCol(i); val c2 = auroraCol((i + 1) % 3)
+            ribbonShader[i] = SweepGradient(cX, cY,
+                intArrayOf(0, 0, Color.argb(235, Color.red(c1), Color.green(c1), Color.blue(c1)), Color.argb(255, Color.red(c2), Color.green(c2), Color.blue(c2)), 0, 0),
+                floatArrayOf(0f, 0.12f, 0.40f, 0.62f, 0.88f, 1f))
+        }
+    }
+
+    private fun auroraEnvelope(age: Float): Float = sm((age / 0.9f).coerceIn(0f, 1f)) * (1f - sm(((age - 2.55f) / 1.0f).coerceIn(0f, 1f)))
+
+    /** Behind the character: the ambient glow and the flowing ribbons. */
+    private fun drawAuroraBack(c: Canvas, now: Long) {
+        if (magicAt == 0L) return
+        val age = (now - magicAt) / 1000f
+        if (age < 0.12f || age >= 3.6f) return
+        if (glowShader == null) buildAurora()
+        val a = age - 0.12f
+        val env = auroraEnvelope(a)
+        if (env <= 0.01f) return
+        val cX = mLeft + 329f * k; val cY = mTop + 321f * k
+        val grow = 0.82f + 0.18f * sm((a / 1.3f).coerceIn(0f, 1f)) + 0.02f * sin(a * 1.7f)
+        val sp = if (calm) 0.5f else 1f
+        // ambient glow: a soft ellipse of light, never opaque
+        c.save(); c.scale(1.22f * grow, 0.86f * grow, cX, cY)
+        glowPaint.shader = glowShader; glowPaint.alpha = (255f * env * (0.8f + 0.2f * sin(a * 2.2f))).toInt().coerceIn(0, 255)
+        c.drawCircle(cX, cY, s * 0.56f, glowPaint)
+        c.restore(); glowPaint.shader = null
+        // ribbons: tilted ellipses whose gradient slowly orbits
+        for (i in 0..2) {
+            val sh = ribbonShader[i] ?: continue
+            auroraM.setRotate(a * ribSpeed[i] * sp + i * 110f, cX, cY)
+            sh.setLocalMatrix(auroraM)
+            auroraStroke.shader = sh
+            auroraStroke.strokeWidth = ribWidth[i] * d * (0.85f + 0.15f * sin(a * 1.9f + i * 2f))
+            auroraStroke.alpha = (230f * env * (if (i == 2) 0.7f else 1f)).toInt().coerceIn(0, 255)
+            c.save(); c.rotate(ribTilt[i] + 4f * sin(a * 0.8f + i), cX, cY)
+            val g = grow * (1f + 0.02f * sin(a * 1.4f + i * 1.3f))
+            rect.set(cX - s * ribRx[i] * g, cY - s * ribRy[i] * g, cX + s * ribRx[i] * g, cY + s * ribRy[i] * g)
+            c.drawOval(rect, auroraStroke)
+            c.restore()
+        }
+        auroraStroke.shader = null
+    }
+
+    /** In front of the character: the completion flash, glowing rings and drifting particles (all thin and translucent). */
     private fun drawLongPressMagic(c: Canvas, now: Long) {
         drawHoldProgress(c, now)
         if (magicAt == 0L) return
         val age = (now - magicAt) / 1000f
-        if (age >= 1.3f) { magicAt = 0L; return }
+        if (age >= 3.6f) { magicAt = 0L; return }
         if (!ringBuilt) buildRing()
-        val color = ringColor()
-        val e = sm((age / 0.6f).coerceIn(0f, 1f))
-        val envelope = (1f - ((age - 0.3f) / 1.0f).coerceIn(0f, 1f))
         val cX = mLeft + 329f * k; val cY = mTop + 321f * k
-        c.save()
-        val sc = 1f + 0.022f * e
-        c.scale(sc, sc, cX, cY)
-        magicRing.color = color; magicRing.strokeWidth = (2.6f - 1.2f * e) * d
-        magicRing.alpha = (240 * envelope).toInt()
-        c.drawPath(ringPath, magicRing)
-        c.restore()
-        val limit = mTop + s * 1.06f
-        for (i in 0 until 12) {
-            val travel = sm(((age - 0.04f - (i % 3) * 0.05f) / 0.85f).coerceIn(0f, 1f))
-            ringMeasure.getPosTan(ringLen * (i / 12f), ringPos, null)
-            var dx = ringPos[0] - cX; var dy2 = ringPos[1] - cY
-            val len = hypot(dx, dy2).coerceAtLeast(1f); dx /= len; dy2 /= len
-            val x = ringPos[0] + dx * s * 0.07f * travel
-            val y = ringPos[1] + dy2 * s * 0.07f * travel - s * 0.025f * travel
-            if (y > limit) continue
-            val tw = 0.65f + 0.35f * sin(age * 18f + i)
-            magicDot.color = color
-            magicDot.alpha = (240f * envelope * (1f - travel * 0.55f) * tw).toInt().coerceIn(0, 255)
-            val r = d * (1.1f + (i % 3) * 0.55f)
-            if (i % 2 == 0) {
-                c.save(); c.translate(x, y); c.rotate(45f)
-                c.drawRoundRect(-r, -r, r, r, r * 0.3f, r * 0.3f, magicDot); c.restore()
-            } else c.drawCircle(x, y, r, magicDot)
+        val col0 = auroraCol(0); val col1 = auroraCol(1); val col2 = auroraCol(2)
+        // the ring that was filling flashes full and lets go
+        val flash = (1f - (age / 0.55f).coerceIn(0f, 1f))
+        if (flash > 0.01f) {
+            magicRing.color = ringColor(); magicRing.strokeWidth = (2.6f + 1.4f * flash) * d
+            magicRing.alpha = (240f * flash).toInt()
+            c.drawPath(ringPath, magicRing)
+        }
+        val a = age - 0.12f
+        val env = if (a > 0f) auroraEnvelope(a) else 0f
+        if (env > 0.01f) {
+            val sp = if (calm) 0.5f else 1f
+            // three glowing rings breathe in and out at different sizes: a wide faint stroke under a thin bright one
+            for (i in 0..2) {
+                val breathe = 0.5f + 0.5f * sin(a * 1.6f * sp + i * 2.1f)
+                val g = (0.84f + 0.16f * sm((a / 1.3f).coerceIn(0f, 1f))) * (0.97f + 0.05f * breathe)
+                val col = if (i == 0) col0 else if (i == 1) col1 else col2
+                rect.set(cX - s * ringRx[i] * g, cY - s * ringRy[i] * g, cX + s * ringRx[i] * g, cY + s * ringRy[i] * g)
+                magicRing.color = col
+                magicRing.strokeWidth = 5.5f * d; magicRing.alpha = (34f * env * (0.7f + 0.3f * breathe)).toInt()
+                c.drawOval(rect, magicRing)
+                magicRing.strokeWidth = 1.3f * d; magicRing.alpha = (170f * env * (0.65f + 0.35f * breathe)).toInt()
+                c.drawOval(rect, magicRing)
+            }
+            run {
+                // drifting particles on slow orbits, each with its own size, speed and a smooth twinkle
+                val limit = mTop + s * 1.06f
+                for (i in 0 until particleCount) {
+                    val h1 = ((i * 0.6180339f) % 1f); val h2 = ((i * 0.3819660f + 0.17f) % 1f)
+                    val dir = if (i % 2 == 0) 1f else -1f
+                    val ang = (i * 2.39996f) + dir * a * (0.22f + 0.18f * h2) * sp
+                    val rx = s * (0.50f + 0.20f * h1); val ry = s * (0.36f + 0.14f * h2)
+                    val x = cX + cos(ang) * rx
+                    val y = cY + sin(ang) * ry - s * 0.02f * sin(a * 0.9f + i)
+                    if (y > limit) continue
+                    val appear = sm(((a - 0.25f - h2 * 0.6f) / 0.7f).coerceIn(0f, 1f))
+                    val tw = if (calm) 0.8f else (0.55f + 0.45f * sin(a * (1.6f + h1) + i * 1.7f).let { it * it })
+                    val col = when (i % 3) { 0 -> col0; 1 -> col1; else -> col2 }
+                    magicDot.color = col
+                    val r = d * (1.1f + 1.7f * h1)
+                    magicDot.alpha = (150f * env * appear * tw).toInt().coerceIn(0, 255)
+                    c.drawCircle(x, y, r * 2.2f, magicDot)
+                    magicDot.alpha = (235f * env * appear * tw).toInt().coerceIn(0, 255)
+                    if (i % 4 == 0) {
+                        // an occasional four-point star
+                        c.save(); c.translate(x, y); c.rotate(45f)
+                        c.drawRoundRect(-r * 0.55f, -r * 1.9f, r * 0.55f, r * 1.9f, r * 0.3f, r * 0.3f, magicDot)
+                        c.drawRoundRect(-r * 1.9f, -r * 0.55f, r * 1.9f, r * 0.55f, r * 0.3f, r * 0.3f, magicDot)
+                        c.restore()
+                    } else c.drawCircle(x, y, r, magicDot)
+                }
+            }
         }
     }
 
