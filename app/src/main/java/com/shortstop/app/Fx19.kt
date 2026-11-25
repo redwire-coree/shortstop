@@ -431,7 +431,7 @@ class OrangeView(
     override fun onWindowVisibilityChanged(v: Int) {
         super.onWindowVisibilityChanged(v)
         winVisible = v == VISIBLE
-        if (winVisible) { lastFrame = 0L; invalidate() }
+        if (winVisible) { lastFrame = 0L; invalidate() } else { sayToken++; bubble?.dismissNow() }
     }
 
     override fun onMeasure(w: Int, h: Int) { setMeasuredDimension(vw.toInt(), vh.toInt()) }
@@ -443,10 +443,6 @@ class OrangeView(
     // A speech box belongs to a visible Orange: when he is hidden or the window goes to the background, the box goes too.
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
-        if (visibility != VISIBLE) { sayToken++; bubble?.dismissNow() }
-    }
-    override fun onWindowVisibilityChanged(visibility: Int) {
-        super.onWindowVisibilityChanged(visibility)
         if (visibility != VISIBLE) { sayToken++; bubble?.dismissNow() }
     }
 
