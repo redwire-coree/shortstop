@@ -345,7 +345,7 @@ class MainActivity : Activity() {
             bottomMargin = dp(150); leftMargin = dp(6)
         })
         nudge = v
-        v.say("Ready for a focused session?")
+        v.say("Ready for a focused session?", 0L, LineCat.IDLE)
         v.play(Move.ENCOURAGE, force = true)
         v.setOnClickListener { dismissNudge(); showStartSheet() }
         v.postDelayed({ if (nudge === v) dismissNudge() }, 9000L)
@@ -1502,14 +1502,12 @@ class MainActivity : Activity() {
         if (onBreak) {
             // relax first, then drift off to sleep a few seconds later
             orange.play(Move.BREAK, 1f, true)
-            orange.say("Phew. Break time.")
-            orange.postDelayed({ if (orange.isAttachedToWindow) orange.say(null) }, 2200L)
+            orange.say("Phew. Break time.", 2200L, LineCat.BREAK)
             orange.postDelayed(breakSleepRun, 3200L)
         } else {
             // a full wake-up: eyes open, hand rubs the eye, yawn and stretch, shake it off, then attentive focus
-            orange.say("Good morning!")
+            orange.say("Good morning!", 3000L, LineCat.PLAYFUL)
             orange.playThen(Move.WAKE, Move.FOCUS)
-            orange.postDelayed({ if (orange.isAttachedToWindow) orange.say(null) }, 3000L)
         }
     }
 
@@ -1583,7 +1581,7 @@ class MainActivity : Activity() {
         endArmed = true
         val o = calmOrange ?: return
         o.removeCallbacks(breakSleepRun)
-        o.say("Please... one more minute?")
+        o.say("Please... one more minute?", 0L, LineCat.ENDING)
         o.play(Move.BEGGING, 1f, true)
     }
 
@@ -1592,9 +1590,8 @@ class MainActivity : Activity() {
         if (!endArmed) return
         endArmed = false
         val o = calmOrange ?: return
-        o.say("Phew. Back to it.")
+        o.say("Phew. Back to it.", 1800L, LineCat.PLAYFUL)
         o.play(if (Store.onBreak(this)) Move.BREAK else Move.FOCUS, 1f, true)
-        o.postDelayed({ if (o.isAttachedToWindow) o.say(null) }, 1800L)
         if (Store.onBreak(this)) o.postDelayed(breakSleepRun, 3200L)
     }
 
@@ -1696,7 +1693,7 @@ class MainActivity : Activity() {
                     calmBreak = onBreak
                     if (onBreak) {
                         c.play(Move.SLEEP, 1f, true)
-                        c.say("Taking a little rest.")
+                        c.say("Taking a little rest.", 0L, LineCat.SLEEP)
                     } else {
                         c.play(Move.ENTER, 1f, true)
                         c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this) && !endArmed) c.play(Move.FOCUS, 1f, true) }, 1500L)
@@ -2423,7 +2420,8 @@ class MainActivity : Activity() {
         // Dither Veil: burn through the 1-bit photo with a finger
         content.gravity = Gravity.CENTER_VERTICAL
         val orange = OrangeView(this, fonts, pal.dark, 92f)
-        orange.say("Your next focus session is ready.")
+        orange.lineCat = { LineCat.SCHEDULE }
+        orange.say("Your next focus session is ready.", 0L, LineCat.SCHEDULE)
         orange.play(Move.LISTEN, force = true)
         content.addView(orange, lp(wrapC, wrapC).apply { gravity = Gravity.CENTER_HORIZONTAL })
         content.addView(display("Create your\nstudy schedule", 22f).apply {
@@ -2475,7 +2473,13 @@ class MainActivity : Activity() {
                         refreshStatus()
                         toast("$n added")
                         schedCol?.let { col -> for (k in 0 until col.childCount) popIn(col.getChildAt(k), 40L + k * 70L) }
-                    }, onDone = { rootFrame.removeView(blur) })
+                    }, onDone = {
+                        // always give the real screen back: the template page, the status bar tint and the button
+                        (blur.parent as? ViewGroup)?.removeView(blur)
+                        content.visibility = View.VISIBLE
+                        busy = false
+                        updateStatusBar()
+                    })
                 }
                 press(this)
             }

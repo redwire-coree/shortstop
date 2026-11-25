@@ -268,15 +268,10 @@ class OrangeView(
     private val textP = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = fonts.semi; color = FocusTheme.title(dark); textSize = 14f * ctx.resources.displayMetrics.scaledDensity
     }
-    private val bubbleP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (dark) 0xFF3A2517.toInt() else 0xFFFFFFFF.toInt() }
-    private val bubbleEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = if (dark) 0xFF4D3322.toInt() else 0xFFF6E2C8.toInt(); style = Paint.Style.STROKE; strokeWidth = d
-    }
-    private var text: String? = null
-    private var layout: StaticLayout? = null
-    private var bubbleT0 = 0L
-    private val bubbleSpring = SpringInterpolator(18f, 0.55f, 0.6f)
-    private val tail = Path()
+    private var bubble: OrangeBubble? = null
+    private var sayToken = 0
+    /** Lets an owner say what Orange's lines are about when the move alone does not tell (e.g. the schedule card). */
+    var lineCat: (() -> LineCat?)? = null
 
     private val longPress = Runnable {
         // fires at most once per press: longFired is set first and every later path checks it
@@ -294,15 +289,47 @@ class OrangeView(
     }
 
     // ---- public API
-    fun say(t: String?) {
-        text = t
-        layout = null
-        if (t != null) {
-            val maxW = (vw - s * 1.12f - 4f * d - 24f * d).toInt()
-            layout = StaticLayout(t, textP, maxW, Layout.Alignment.ALIGN_CENTER, 1f, 0f, false)
-            bubbleT0 = SystemClock.uptimeMillis()
+    /** Body rectangle in this view's own coordinates (the layout box, not the animated pose). */
+    fun bodyBounds(r: RectF) { r.set(mLeft, mTop, mLeft + s, mTop + s) }
+
+    private fun moveCat(): LineCat = lineCat?.invoke() ?: when (move) {
+        Move.BEGGING -> LineCat.BEGGING; Move.DEAD -> LineCat.DEAD; Move.SLEEP -> LineCat.SLEEP
+        Move.BREAK -> LineCat.BREAK; Move.FOCUS -> LineCat.FOCUS; else -> LineCat.IDLE
+    }
+
+    /** Shows [t] in the speech box for [ms] (0 = until replaced or cleared); null clears it. */
+    fun say(t: String?, ms: Long = 0L, cat: LineCat? = null) {
+        sayToken++
+        if (t == null) { bubble?.hide(); return }
+        if (!isAttachedToWindow) { post { if (isAttachedToWindow) say(t, ms, cat) }; return }
+        val b = bubble ?: OrangeBubble(context, this, dark, fonts.semi, FocusTheme.title(dark)).also { nb ->
+            nb.onTapBubble = { onBubbleTapped() }
+            bubble = nb
         }
-        invalidate()
+        val c = cat ?: moveCat()
+        val tok = sayToken
+        post { if (tok == sayToken && isAttachedToWindow) b.show(t, c, ms) }
+    }
+
+    private fun onBubbleTapped() {
+        val b = bubble ?: return
+        val c = if (b.cat == LineCat.ENDING || b.cat == LineCat.BEGGING || b.cat == LineCat.DEAD) b.cat else moveCat()
+        val next = OrangeLines.pick(c, b.current)
+        sayToken++
+        b.show(next, c, 2600L + next.length * 45L)
+    }
+
+    /** Drops a line whose moment has passed (cheerful text while asleep, begging after the session is undone...). */
+    private fun dropStaleBubble() {
+        val b = bubble ?: return
+        if (!b.isShowing) return
+        val stale = when (b.cat) {
+            LineCat.BEGGING, LineCat.ENDING -> move != Move.BEGGING
+            LineCat.DEAD -> move != Move.DEAD
+            LineCat.SLEEP -> move != Move.SLEEP
+            else -> move == Move.DEAD || move == Move.BEGGING
+        }
+        if (stale) { sayToken++; b.hide() }
     }
 
     private fun prio(m: Move) = when (m) {
@@ -320,13 +347,15 @@ class OrangeView(
         values.copyInto(blendFrom)
     }
 
+    private val blendTmp = FloatArray(16)
     private fun blendPose(now: Long) {
         if (!blendActive) return
         val f = ((now - blendStarted).toFloat() / blendDuration).coerceIn(0f, 1f)
         // A critically damped-looking ease, with no overshoot at the end of a pose change.
         val e = f * f * (3f - 2f * f)
-        val v = floatArrayOf(dy, sx, sy, rot, lag, armL, armR, eyeOpenT, happyT,
-            pupilT, lookXT, lookYT, mouthYT, leafBiasT, spark, stars)
+        val v = blendTmp
+        v[0] = dy; v[1] = sx; v[2] = sy; v[3] = rot; v[4] = lag; v[5] = armL; v[6] = armR; v[7] = eyeOpenT; v[8] = happyT
+        v[9] = pupilT; v[10] = lookXT; v[11] = lookYT; v[12] = mouthYT; v[13] = leafBiasT; v[14] = spark; v[15] = stars
         for (i in v.indices) v[i] = blendFrom[i] + (v[i] - blendFrom[i]) * e
         dy=v[0]; sx=v[1]; sy=v[2]; rot=v[3]; lag=v[4]; armL=v[5]; armR=v[6]
         eyeOpenT=v[7]; happyT=v[8]; pupilT=v[9]; lookXT=v[10]; lookYT=v[11]
@@ -392,7 +421,7 @@ class OrangeView(
 
     // ---- lifecycle
     override fun onAttachedToWindow() { super.onAttachedToWindow(); attached = true; lastFrame = 0L; invalidate() }
-    override fun onDetachedFromWindow() { attached = false; removeCallbacks(longPress); super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { attached = false; removeCallbacks(longPress); sayToken++; bubble?.dismissNow(); super.onDetachedFromWindow() }
     override fun onWindowVisibilityChanged(v: Int) {
         super.onWindowVisibilityChanged(v)
         winVisible = v == VISIBLE
@@ -557,7 +586,7 @@ class OrangeView(
                 val b = sin(t * 1.15f)
                 sy = 1f + 0.016f * b; sx = 1f - 0.009f * b
                 rot = 0.8f * sin(t * 0.6f)
-                eyeOpenT = 0.62f; mouthMode = 1; leafBiasT = -7f
+                eyeOpenT = 0.8f; mouthMode = 1; leafBiasT = -7f
                 armL = 0.10f + 0.025f * sin(t * 0.8f)
                 armR = 0.11f + 0.022f * sin(t * 0.72f + 0.8f)
                 blinkQuiet = 0.6f
@@ -1173,9 +1202,12 @@ class OrangeView(
             if (happy > 0.5f) { rect.set(-w / 2f, -h * 0.2f, w / 2f, h * 1.8f); c.drawArc(rect, 200f, 140f, false, lid) }
             else { rect.set(-w / 2f, -h * 1.5f, w / 2f, h * 0.5f); c.drawArc(rect, 20f, 140f, false, lid) }
         } else {
-            c.scale(k * sx, k * sy * op.coerceIn(0.05f, 1.15f))
-            // lids: how much of the eye is covered from above, and how slanted the lid line is
-            val cover = rg[RigCh.LID_L_COVER + i].coerceIn(0f, 1f); val tilt = rg[RigCh.LID_L_TILT + i].coerceIn(-1f, 1f)
+            // The eye keeps its true shape. Partial openness (blinks, relaxed break eyes) is a lid coming down over it,
+            // never a squash, so the pupils stay round and both eyes stay symmetric. Only wide-eyed (>1) stretches.
+            val opc = op.coerceIn(0f, 1.15f)
+            c.scale(k * sx, k * sy * (if (opc > 1f) opc else 1f))
+            val lidBase = rg[RigCh.LID_L_COVER + i].coerceIn(0f, 1f)
+            val cover = lidBase + (1f - lidBase) * (1f - opc.coerceAtMost(1f)); val tilt = rg[RigCh.LID_L_TILT + i].coerceIn(-1f, 1f)
             if (cover > 0.01f || abs(tilt) > 0.02f) {
                 val wl = white.x - e[0]; val wt = white.y - e[1]; val ww = white.bmp.width.toFloat(); val wh = white.bmp.height.toFloat()
                 val yc = wt + wh * cover
@@ -1566,29 +1598,7 @@ class OrangeView(
         drawZzz(c, dt)
         drawLongPressMagic(c, now)
 
-        // speech bubble
-        val lay = layout
-        if (lay != null) {
-            val bp = ((now - bubbleT0) / 600f).coerceIn(0f, 1f)
-            val sc = bubbleSpring.getInterpolation(bp).coerceAtLeast(0.01f)
-            val padH = 12f * d; val padV = 9f * d
-            val bw = lay.width + padH * 2; val bh = lay.height + padV * 2
-            val bL = s * 1.12f; val bT = mTop + s * 0.14f
-            val tipX = bL - 7f * d; val tipY = bT + bh * 0.7f
-            c.save()
-            c.scale(sc, sc, tipX, tipY)
-            rect.set(bL, bT, bL + bw, bT + bh)
-            tail.reset()
-            tail.moveTo(bL + 2f * d, tipY - 7f * d); tail.lineTo(tipX, tipY); tail.lineTo(bL + 2f * d, tipY + 5f * d); tail.close()
-            c.drawRoundRect(rect, 16f * d, 16f * d, bubbleP)
-            c.drawRoundRect(rect, 16f * d, 16f * d, bubbleEdge)
-            c.drawPath(tail, bubbleP)
-            c.save()
-            c.translate(bL + padH, bT + padV)
-            lay.draw(c)
-            c.restore()
-            c.restore()
-        }
+        dropStaleBubble()
 
         c.restore()
         c.restore()
@@ -1869,7 +1879,7 @@ class OrangeView(
                             petSide = if (e.x < width / 2f) -1f else 1f
                             petStrength = 1f
                             tapRun = if (now - lastTap < 2500L) tapRun + 1 else 1
-                            if (tapRun >= 3) { tapRun = 0; say("You've got this!") ; postDelayed({ if (isAttachedToWindow) say(null) }, 1500L) }
+                            if (tapRun >= 3) { tapRun = 0; say("You've got this!", 1800L, LineCat.PLAYFUL) }
                             performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                             invalidate()
                         } else if (move == Move.SLEEP) {
