@@ -336,8 +336,10 @@ class MainActivity : Activity() {
         }
     }
 
+    private val nudgeRun = Runnable { maybeNudge() }
+
     private fun maybeNudge() {
-        if (companion != null || nudge != null || tab != 0 || tourView != null || Store.focusRunning(this)) return
+        if (companion != null || nudge != null || tab != 0 || tourView != null || sheetLayer != null || Store.focusRunning(this)) return
         val now = System.currentTimeMillis()
         if (now - lastNudge < 90_000L) return
         lastNudge = now
@@ -346,6 +348,7 @@ class MainActivity : Activity() {
             bottomMargin = dp(150); leftMargin = dp(6)
         })
         nudge = v
+        v.contentDescription = "Orange. Tap to start a focus session."
         v.say("Ready for a focused session?", 0L, LineCat.IDLE)
         v.play(Move.ENCOURAGE, force = true)
         v.setOnClickListener { dismissNudge(); showStartSheet() }
@@ -467,7 +470,8 @@ class MainActivity : Activity() {
         clearBlurEffects()
         super.onResume()
         Store.finalizeFocus(this)
-        window.decorView.postDelayed({ maybeNudge() }, 6000L)
+        window.decorView.removeCallbacks(nudgeRun)
+        window.decorView.postDelayed(nudgeRun, 6000L)
         scheduleSleep()
         refreshStatus()
         Cards.sync(this).let { got ->
@@ -485,6 +489,8 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         ui.removeCallbacks(ticker)
+        window.decorView.removeCallbacks(nudgeRun)
+        dismissNudge()
         // Do not let an idle timer change the mascot's pose while the Activity is backgrounded.
         companionOrange?.removeCallbacks(sleepRun)
         super.onPause()
@@ -1054,7 +1060,7 @@ class MainActivity : Activity() {
         // blur what is behind the sheet (the real views, not the toast or sparkle layers), then dim it only gently
         clearBlurEffects()
         val blurTargets = (0 until rootFrame.childCount).map { rootFrame.getChildAt(it) }
-            .filter { v -> v.tag != "closing-sheet" }
+            .filter { v -> v.tag != "closing-sheet" && v.tag != "toast" }
             .filter { v -> (v as Any) !== (toaster as Any?) && (v as Any) !== (spark as Any?) && (v as Any) !== (sheetLayer as Any?) }
         val scrim = SheetBackdrop(this, blurTargets, 0x59140A04, rootFrame).apply {
             setOnClickListener { closeSheet() }
@@ -1317,7 +1323,7 @@ class MainActivity : Activity() {
 
         // Orange lives here on the idle Focus screen: breathing, blinking, glancing, reacting to taps, dozing off when left alone
         val comp = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
-        val co = OrangeView(this, fonts, pal.dark, 64f)
+        val co = OrangeView(this, fonts, pal.dark, 64f).apply { contentDescription = "Orange, your focus companion" }
         co.setOnClickListener { scheduleSleep() }
         // OrangeView reserves a wide canvas for its optional speech bubble. Its actual
         // character is drawn near the left edge; a negative host margin clipped half of him.
@@ -2485,6 +2491,7 @@ class MainActivity : Activity() {
             c.addView(lc, lp(0, wrapC, 1f).apply { marginEnd = dp(10) })
             var busy = false
             val add = GlyphBtn(this, true, pal.ink, pal.canvas, 0, true).apply {
+                contentDescription = "Add $n schedule"
                 setOnClickListener {
                     if (busy) return@setOnClickListener
                     busy = true
@@ -2519,6 +2526,13 @@ class MainActivity : Activity() {
                 press(this)
             }
             c.addView(add, lp(dp(34), dp(34)))
+            // the button looks 34 dp but the touch area is 48 dp
+            c.post {
+                val r = android.graphics.Rect(); add.getHitRect(r)
+                val grow = dp(7)
+                r.inset(-grow, -grow)
+                c.touchDelegate = android.view.TouchDelegate(r, add)
+            }
             strip.addView(c, lp(cardW, wrapC).apply { marginStart = dp(6); marginEnd = dp(6) })
         }
         val hs = android.widget.HorizontalScrollView(this).apply {

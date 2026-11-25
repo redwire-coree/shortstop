@@ -440,6 +440,16 @@ class OrangeView(
      * The view grows leftwards by [padL] without moving anything else: the slot the host gave it is unchanged
      * and the character is drawn that much further in, so it lands on exactly the same screen position.
      */
+    // A speech box belongs to a visible Orange: when he is hidden or the window goes to the background, the box goes too.
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        if (visibility != VISIBLE) { sayToken++; bubble?.dismissNow() }
+    }
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility != VISIBLE) { sayToken++; bubble?.dismissNow() }
+    }
+
     override fun layout(l: Int, t: Int, r: Int, b: Int) { super.layout(l - padL.toInt(), t, r, b) }
 
     // ---- animation helpers

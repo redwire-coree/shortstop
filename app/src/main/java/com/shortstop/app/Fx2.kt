@@ -777,6 +777,7 @@ class Toaster(
         val screenW = ctx.resources.displayMetrics.widthPixels
         val lp = FrameLayout.LayoutParams(minOf(dp(356), screenW - dp(32)), ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = bottomPx }
+        card.tag = "toast"   // lets a sheet's backdrop leave toasts sharp
         host.addView(card, lp)
         cur = card
 
@@ -788,7 +789,7 @@ class Toaster(
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     fuseAnim?.resume()
                     if (e.rawY - downY > dp(40)) remove(card, true)
-                    else v.animate().translationY(0f).setDuration(220).setInterpolator(OvershootInterpolator(1.0f)).start()
+                    else v.animate().translationY(0f).setDuration(220).setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
                     true
                 }
                 else -> true
@@ -797,7 +798,7 @@ class Toaster(
 
         card.translationY = dp(120).toFloat()
         card.alpha = 0f
-        card.animate().translationY(0f).alpha(1f).setDuration(400).setInterpolator(OvershootInterpolator(1.0f)).start()
+        card.animate().translationY(0f).alpha(1f).setDuration(320).setInterpolator(android.view.animation.DecelerateInterpolator(1.8f)).start()
         val fa = ValueAnimator.ofFloat(1f, 0f)
         fa.duration = ms
         fa.interpolator = LinearInterpolator()
