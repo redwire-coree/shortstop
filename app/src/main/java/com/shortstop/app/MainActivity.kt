@@ -1052,7 +1052,7 @@ class MainActivity : Activity() {
         val layer = FrameLayout(this)
         // blur what is behind the sheet (the real views, not the toast or sparkle layers), then dim it only gently
         val blurTargets = (0 until rootFrame.childCount).map { rootFrame.getChildAt(it) }
-            .filter { it !== toaster && it !== spark && it !== sheetLayer }
+            .filter { v -> (v as Any) !== (toaster as Any?) && (v as Any) !== (spark as Any?) && (v as Any) !== (sheetLayer as Any?) }
         val scrim = SheetBackdrop(this, blurTargets, 0x59140A04, rootFrame).apply {
             setOnClickListener { closeSheet() }
         }
