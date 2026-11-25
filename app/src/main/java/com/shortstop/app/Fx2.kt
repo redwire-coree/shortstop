@@ -522,6 +522,9 @@ class FuseButton(
                 if (state == 0) { invalidate(); requestLayout() }
             }
         }
+    /** Called the moment the fuse is lit (button pressed and allowed), and when the user takes it back with Undo. */
+    var onArm: (() -> Unit)? = null
+    var onUndo: (() -> Unit)? = null
     private var state = 0
     private var fuse = 0f
     private var swap = 1f
@@ -638,6 +641,7 @@ class FuseButton(
             if (!guard()) return
             performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
             swapTo(1)
+            onArm?.invoke()
             burn?.cancel()
             burn = ValueAnimator.ofFloat(0f, 1f).apply {
                 duration = windowMs
@@ -653,6 +657,7 @@ class FuseButton(
             burn?.cancel()
             fuse = 0f
             swapTo(0)
+            onUndo?.invoke()
         }
     }
 

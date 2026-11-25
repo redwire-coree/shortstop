@@ -117,7 +117,9 @@ class OrangeView(
 
     private val vw = s * 2.7f
     private val vh = s * 1.75f
-    private val mLeft = s * 0.12f
+    /** Extra drawing room to the left: the Aurora reaches about 0.09 x Orange's size past the old left edge and was cut off there. */
+    private val padL = s * 0.32f
+    private val mLeft = s * 0.12f + padL
     private val mTop = vh - s * 0.07f - s
     private val feet = mTop + s * 634f / 640f
     private val cx = mLeft + s / 2f
@@ -398,6 +400,12 @@ class OrangeView(
     }
 
     override fun onMeasure(w: Int, h: Int) { setMeasuredDimension(vw.toInt(), vh.toInt()) }
+
+    /**
+     * The view grows leftwards by [padL] without moving anything else: the slot the host gave it is unchanged
+     * and the character is drawn that much further in, so it lands on exactly the same screen position.
+     */
+    override fun layout(l: Int, t: Int, r: Int, b: Int) { super.layout(l - padL.toInt(), t, r, b) }
 
     // ---- animation helpers
     private fun bump(t: Float, a: Float, b: Float): Float =

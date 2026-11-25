@@ -327,7 +327,7 @@ class MainActivity : Activity() {
         companionSub?.let { if (it.text.toString() != line) it.text = line }
         val p = Store.prefs(this)
         val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
-        if (goalMet && tab == 0 && p.getString("proud_day", "") != day) {
+        if (goalMet && tab == 0 && !deadPlaying && p.getString("proud_day", "") != day) {
             p.edit().putString("proud_day", day).apply()
             companionMessage("Daily goal reached. Nicely done.")
             companionOrange?.play(Move.PROUD, 1f, true)
@@ -1081,7 +1081,7 @@ class MainActivity : Activity() {
                     if (e.rawY - downY > dp(110)) closeSheet()
                     else {
                         panel.animate().translationY(0f).setDuration(420).setInterpolator(SpringInterpolator(16f, 0.6f, 0.8f)).start()
-                        scrim.animate().alpha(1f).setDuration(200).start()
+                        scrim.animate().alpha(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(1.4f)).start()
                     }
                     true
                 }
@@ -1102,7 +1102,7 @@ class MainActivity : Activity() {
         toaster?.front()
         spark?.bringToFront()
         panel.translationY = dp(700).toFloat()
-        scrim.animate().alpha(1f).setDuration(200).start()
+        scrim.animate().alpha(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(1.4f)).start()
         panel.animate().translationY(0f).setDuration(520).setInterpolator(SpringInterpolator(14f, 0.8f, 0.9f)).start()
         sheetLayer = layer
         sheetPanel = panel
@@ -1112,7 +1112,7 @@ class MainActivity : Activity() {
 
     private fun closeSheet(animate: Boolean = true) {
         val layer = sheetLayer ?: return
-        companionOrange?.let { if (!Store.focusRunning(this)) it.play(Move.IDLE, 1f, true); scheduleSleep() }
+        companionOrange?.let { if (!Store.focusRunning(this) && !deadPlaying) { it.play(Move.IDLE, 1f, true); scheduleSleep() } }
         val panel = sheetPanel
         val scrim = sheetScrim
         val cb = sheetClose
@@ -1124,7 +1124,7 @@ class MainActivity : Activity() {
             rootFrame.removeView(layer)
             return
         }
-        scrim.animate().alpha(0f).setDuration(180).start()
+        scrim.animate().alpha(0f).setDuration(220).setInterpolator(android.view.animation.AccelerateDecelerateInterpolator()).start()
         panel.animate().translationY(dp(700).toFloat()).setDuration(220).withEndAction {
             rootFrame.removeView(layer)
             cb?.invoke()
@@ -1330,12 +1330,10 @@ class MainActivity : Activity() {
         val breakBtn = pill("Take a break", false) { onBreakClick() }
         val endBtn = FuseButton(this, pal, fonts, "End session", "Undo", "Ended", 4000L,
             { if (Store.frozen(this)) { free(); false } else true }) {
-            Store.endFocusEarly(this)
-            playEarlyQuitReaction()
-            wasRunning = false
-            updateRunning()
-            fillFocusStats()
+            commitEndSession()
         }
+        endBtn.onArm = { onEndArmed() }
+        endBtn.onUndo = { onEndUndone() }
         runBreakBtn = breakBtn
         runEndBtn = endBtn
         breakBtn.setSingleLine(true)
@@ -1496,6 +1494,7 @@ class MainActivity : Activity() {
 
     private fun playBreakCompanionTransition(onBreak: Boolean) {
         val orange = calmOrange ?: return
+        if (endArmed) return   // never override the End-session plea
         // Cancelling a half-finished pop-in leaves the view part-transparent and shrunk: settle it fully instead.
         orange.animate().cancel(); orange.alpha = 1f; orange.scaleX = 1f; orange.scaleY = 1f
         // A newer transition always wins: pending callbacks from the old one are cancelled first.
@@ -1573,17 +1572,58 @@ class MainActivity : Activity() {
         showSheet("Animation showcase", scroll)
     }
 
-    private fun playEarlyQuitReaction() {
+    // ---- End session: pressed -> nervous / begging -> (session really ends) -> dead performance.
+    // No "played once" flags exist: every press and every ended session runs the whole sequence again.
+    private var endArmed = false
+    private var deadToken = 0
+    private var deadPlaying = false
+
+    /** Stage 1, the instant End session is pressed (and allowed): Orange begs while the Undo window runs. */
+    private fun onEndArmed() {
+        endArmed = true
+        val o = calmOrange ?: return
+        o.removeCallbacks(breakSleepRun)
+        o.say("Please... one more minute?")
+        o.play(Move.BEGGING, 1f, true)
+    }
+
+    /** The user took it back: relief, then back to whatever state the session is really in. */
+    private fun onEndUndone() {
+        if (!endArmed) return
+        endArmed = false
+        val o = calmOrange ?: return
+        o.say("Phew. Back to it.")
+        o.play(if (Store.onBreak(this)) Move.BREAK else Move.FOCUS, 1f, true)
+        o.postDelayed({ if (o.isAttachedToWindow) o.say(null) }, 1800L)
+        if (Store.onBreak(this)) o.postDelayed(breakSleepRun, 3200L)
+    }
+
+    /** Stage 2: runs only when the existing end logic has really ended the session. */
+    private fun commitEndSession() {
+        endArmed = false
+        val ended = Store.endFocusEarly(this)
+        wasRunning = false
+        updateRunning()
+        fillFocusStats()
+        if (ended) playEndedDead()
+    }
+
+    private fun playEndedDead() {
         val c = companionOrange ?: return
-        val prefs = Store.prefs(this)
-        val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
-        val oldDay = prefs.getString("orange_quit_day", "")
-        val count = if (oldDay == day) prefs.getInt("orange_quit_count", 0) + 1 else 1
-        prefs.edit().putString("orange_quit_day", day).putInt("orange_quit_count", count).apply()
-        companionMessage(if (count >= 3) "Want to pause, or try one more minute?" else "One more minute, or finish here?")
-        c.play(if (count >= 3) Move.DEAD else Move.BEGGING, 1f, true)
-        // the dead performance runs its own recovery (about 6.2 s), so let it finish before idle takes over
-        c.postDelayed({ if (c.isAttachedToWindow) c.play(Move.IDLE, 1f, true) }, if (count >= 3) 6800L else 4200L)
+        val token = ++deadToken
+        deadPlaying = true
+        companionMessage("Well. That happened.", 6400L)
+        // a beat after the screen switches, so the first frame of the performance is on screen
+        c.postDelayed({
+            if (token != deadToken || !c.isAttachedToWindow) return@postDelayed
+            c.removeCallbacks(sleepRun)
+            c.play(Move.DEAD, 1f, true)
+        }, 120L)
+        c.postDelayed({
+            if (token != deadToken) return@postDelayed
+            deadPlaying = false
+            if (c.isAttachedToWindow) { c.play(Move.IDLE, 1f, true); scheduleSleep() }
+        }, 6900L)
     }
 
     private fun onEndClick() {
@@ -1591,13 +1631,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("End this session?")
             .setMessage("The focus time so far is saved.")
-            .setPositiveButton("End session") { _, _ ->
-                Store.endFocusEarly(this)
-                playEarlyQuitReaction()
-                wasRunning = false
-                updateRunning()
-                fillFocusStats()
-            }
+            .setPositiveButton("End session") { _, _ -> commitEndSession() }
             .setNegativeButton("Keep going", null)
             .show()
     }
@@ -1665,7 +1699,7 @@ class MainActivity : Activity() {
                         c.say("Taking a little rest.")
                     } else {
                         c.play(Move.ENTER, 1f, true)
-                        c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this)) c.play(Move.FOCUS, 1f, true) }, 1500L)
+                        c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this) && !endArmed) c.play(Move.FOCUS, 1f, true) }, 1500L)
                     }
                 } else if (calmBreak == null) {
                     calmBreak = onBreak
@@ -1680,6 +1714,7 @@ class MainActivity : Activity() {
             runElapsed?.text = clock(now - start)
         } else {
             calmBreak = null
+            endArmed = false
             calmOrange?.let { it.animate().cancel(); it.visibility = View.GONE }
             runEndBtn?.reset()
             runRing?.stop()

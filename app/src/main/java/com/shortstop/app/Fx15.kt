@@ -46,7 +46,18 @@ class UpwardBlurView(ctx: Context) : View(ctx) {
         midFired = false
         invalidate()
         if (calm) { onMid(); onDone(); return }
-        pool.execute { try { buildLevels(snapshot) } catch (e: Throwable) { } }
+        // Build every blur level BEFORE the motion starts. (They used to be made while the animation was already
+        // running, so levels popped in late and the blur visibly jumped in steps.) Meanwhile the still snapshot is
+        // shown, which looks identical to the live screen, so nothing is visible during the wait.
+        val myAnim = Runnable { runAnimation(onMid, onDone) }
+        pool.execute {
+            try { buildLevels(snapshot) } catch (e: Throwable) { }
+            post(myAnim)
+        }
+    }
+
+    private fun runAnimation(onMid: () -> Unit, onDone: () -> Unit) {
+        if (!isAttachedToWindow) { onMid(); onDone(); return }
         anim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 980
             interpolator = PathInterpolator(0.40f, 0f, 0.18f, 1f)
@@ -98,6 +109,9 @@ class UpwardBlurView(ctx: Context) : View(ctx) {
         val fadeT = ((p - 0.5f) / 0.5f).coerceIn(0f, 1f)
         val a255 = ((1f - fadeT * fadeT * (3f - 2f * fadeT)) * 255).toInt()
         if (a255 <= 0) return
+        // The whole picture fades as ONE layer. Fading each strip separately made the 1 px overlaps between strips
+        // draw twice, which showed up as faint horizontal lines while the blur was fading out.
+        val layer = if (a255 < 255) c.saveLayerAlpha(0f, 0f, w, h, a255) else -1
         for (i in 0..N) {
             val a = level(i / N.toFloat())
             lvl[i] = a * LEVELS
@@ -112,17 +126,18 @@ class UpwardBlurView(ctx: Context) : View(ctx) {
             dstR.set(0f, s0 * h + shift[i], w, s1 * h + shift[i + 1] + 1f)
             val a = pick(lo) ?: sn
             srcR.set(0, (s0 * a.height).toInt(), a.width, ((s1 * a.height).toInt() + 1).coerceAtMost(a.height))
-            paint.alpha = a255
+            paint.alpha = 255
             c.drawBitmap(a, srcR, dstR, paint)
             if (fr > 0.02f && hi != lo) {
                 val b = pick(hi) ?: continue
                 if (b !== a) {
                     srcR.set(0, (s0 * b.height).toInt(), b.width, ((s1 * b.height).toInt() + 1).coerceAtMost(b.height))
-                    paint.alpha = (a255 * fr).toInt()
+                    paint.alpha = (255 * fr).toInt()
                     c.drawBitmap(b, srcR, dstR, paint)
                 }
             }
         }
+        if (layer >= 0) c.restoreToCount(layer)
         if (p < 1f) postInvalidateOnAnimation()
     }
 
