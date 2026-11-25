@@ -2476,29 +2476,28 @@ class MainActivity : Activity() {
                 setOnClickListener {
                     if (busy) return@setOnClickListener
                     busy = true
+                    // Capture ONLY the page (transparent background): the cloudy backdrop stays live underneath and is
+                    // never flattened. The page dissolves into one even blur over it while the new list is built below.
+                    orange.say(null)
                     val bmp = Bitmap.createBitmap(content.width, content.height, Bitmap.Config.ARGB_8888)
-                    val cv = Canvas(bmp)
-                    cv.drawColor(FocusTheme.bg(pal.dark))   // opaque, so the blur has no dark fringes
-                    content.draw(cv)
-                    updateStatusBar(true)
-                    // the blur lives above the whole screen so it can fade out over the new schedule list
-                    val rootFrame = window.decorView as ViewGroup
+                    content.draw(Canvas(bmp))
+                    val host = window.decorView as ViewGroup
                     val a = IntArray(2); val b = IntArray(2)
-                    content.getLocationInWindow(a); rootFrame.getLocationInWindow(b)
-                    val blur = UpwardBlurView(this@MainActivity)
-                    rootFrame.addView(blur, FrameLayout.LayoutParams(content.width, content.height).apply {
+                    content.getLocationInWindow(a); host.getLocationInWindow(b)
+                    val blur = PageBlurFade(this@MainActivity)
+                    host.addView(blur, FrameLayout.LayoutParams(content.width, content.height).apply {
                         leftMargin = a[0] - b[0]; topMargin = a[1] - b[1]
                     })
                     content.visibility = View.INVISIBLE
-                    blur.start(bmp, onMid = {
+                    blur.start(bmp, mid = {
                         Store.saveSchedules(this@MainActivity, Store.schedules(this@MainActivity) +
                             Store.FocusSchedule(System.currentTimeMillis().toString() + i, n, st, en, 31, true))
                         fillSchedules()
                         refreshStatus()
                         toast("$n added")
                         schedCol?.let { col -> for (k in 0 until col.childCount) popIn(col.getChildAt(k), 40L + k * 70L) }
-                    }, onDone = {
-                        // always give the real screen back: the template page, the status bar tint and the button
+                    }, done = {
+                        // always give the real screen back, whichever way the transition ended
                         (blur.parent as? ViewGroup)?.removeView(blur)
                         content.visibility = View.VISIBLE
                         busy = false
