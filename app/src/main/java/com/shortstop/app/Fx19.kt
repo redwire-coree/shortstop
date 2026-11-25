@@ -141,6 +141,8 @@ class OrangeView(
     private var holdStartedAt = 0L
     // Petting is an overlay reaction: it never replaces the active focus/break animation.
     private var petAt = 0L
+    private var petV = 0f
+    private var petSideS = 0f
     private var petSide = 1f
     private var petStrength = 0f
     // A tactile press is a separate, reversible squash overlay; it never changes the active move.
@@ -586,7 +588,7 @@ class OrangeView(
                 val b = sin(t * 1.15f)
                 sy = 1f + 0.016f * b; sx = 1f - 0.009f * b
                 rot = 0.8f * sin(t * 0.6f)
-                eyeOpenT = 0.8f; mouthMode = 1; leafBiasT = -7f
+                eyeOpenT = 1f; pupilT = 0.9f; mouthMode = 1; leafBiasT = -7f
                 armL = 0.10f + 0.025f * sin(t * 0.8f)
                 armR = 0.11f + 0.022f * sin(t * 0.72f + 0.8f)
                 blinkQuiet = 0.6f
@@ -811,6 +813,12 @@ class OrangeView(
 
     /** Eases the face parameters, steps the leaf spring, and runs the blink and glance timers. */
     private fun update(now: Long, dt: Float) {
+        // The pet reaction is a continuously eased level, never a timer that restarts: a new tap just keeps the drive on,
+        // so the pose can never jump back to zero mid-reaction, and the lean side glides instead of flipping.
+        val petDrive = if (petAt != 0L && now - petAt < 300L) 1f else 0f
+        petV += (petDrive * petStrength.coerceIn(0.5f, 1f) - petV) * (1f - exp(-(if (petDrive > petV) 16.0 else 4.5) * dt).toFloat())
+        if (petV < 0.002f && petDrive == 0f) petV = 0f
+        petSideS += (petSide - petSideS) * (1f - exp(-12.0 * dt).toFloat())
         val a = 1f - exp(-14.0 * dt).toFloat()
         eyeOpen += (eyeOpenT - eyeOpen) * a
         happy += (happyT - happy) * (1f - exp(-22.0 * dt).toFloat())
@@ -821,9 +829,16 @@ class OrangeView(
         // glances: an occasional small look-around while idle
         if (move == Move.IDLE || move == Move.BREAK) {
             if (now >= nextGlance) {
-                glX = (Random.nextFloat() - 0.5f) * 1.2f; glY = (Random.nextFloat() - 0.5f) * 0.6f
-                nextGlance = now + Random.nextLong(2200L, 5200L)
-                if (Random.nextFloat() < 0.4f) { glX = 0f; glY = 0f }
+                if (move == Move.BREAK) {
+                    // restless: frequent small side-to-side looks that alternate direction, with a brief return to centre
+                    glX = (if (glX > 0.05f) -1f else 1f) * (0.45f + Random.nextFloat() * 0.5f); glY = (Random.nextFloat() - 0.45f) * 0.35f
+                    nextGlance = now + Random.nextLong(900L, 2100L)
+                    if (Random.nextFloat() < 0.18f) { glX = 0f; glY = 0f }
+                } else {
+                    glX = (Random.nextFloat() - 0.5f) * 1.2f; glY = (Random.nextFloat() - 0.5f) * 0.6f
+                    nextGlance = now + Random.nextLong(2200L, 5200L)
+                    if (Random.nextFloat() < 0.4f) { glX = 0f; glY = 0f }
+                }
             }
         } else { glX = 0f; glY = 0f }
         val tx2 = if (move == Move.IDLE || move == Move.BREAK) glX else lookXT
@@ -958,9 +973,11 @@ class OrangeView(
                 val br = sin(clock * 0.8f)
                 b[RigCh.HEAD_ROT] = 3.6f + 0.8f * sin(clock * 0.37f) * m; b[RigCh.HEAD_Y] = 1.5f + 0.8f * br * m
                 b[RigCh.ARM_L_SH] = lL - 8f + 1.0f * br * m; b[RigCh.ARM_R_SH] = lR - 8f + 1.0f * br * m
-                b[RigCh.LID_L_COVER] = 0.22f; b[RigCh.LID_R_COVER] = 0.22f
-                b[RigCh.LID_L_TILT] = -0.12f; b[RigCh.LID_R_TILT] = -0.12f
-                b[RigCh.MOUTH_SMILE] = 0.5f
+                // restless but cute: eyes stay open and round (no squash), a slight lift of the inner lid corners reads
+                // as unsettled, identical on both eyes; the restlessness itself comes from the darting gaze.
+                b[RigCh.LID_L_COVER] = 0.10f; b[RigCh.LID_R_COVER] = 0.10f
+                b[RigCh.LID_L_TILT] = -0.15f; b[RigCh.LID_R_TILT] = -0.15f
+                b[RigCh.MOUTH_SMILE] = 0.35f
                 b[RigCh.FOOT_L_X] = -5f; b[RigCh.FOOT_R_X] = 5f
                 b[RigCh.LEG_L_ANKLE] = -3f; b[RigCh.LEG_R_ANKLE] = -3f
             }
@@ -1066,12 +1083,12 @@ class OrangeView(
             a[RigCh.ARM_L_SH] += 6f * touchSquash; a[RigCh.ARM_R_SH] += 6f * touchSquash
             a[RigCh.HEAD_Y] += 2.2f * touchSquash
         }
-        val petAge = if (petAt == 0L) 2f else ((now - petAt) / 1000f).coerceAtLeast(0f)
-        val petPulse = if (petAge < 0.82f) sin(Math.PI * (petAge / 0.82f)).toFloat() else 0f
+        val petPulse = petV
         if (petPulse > 0.001f) {
-            a[RigCh.HEAD_ROT] += petSide * 5f * petPulse
-            if (petSide < 0f) { a[RigCh.ARM_L_SH] += 18f * petPulse; a[RigCh.ARM_L_WR] += 8f * petPulse }
-            else { a[RigCh.ARM_R_SH] += 18f * petPulse; a[RigCh.ARM_R_WR] += 8f * petPulse }
+            val wl = max(0f, -petSideS); val wr = max(0f, petSideS)
+            a[RigCh.HEAD_ROT] += petSideS * 5f * petPulse
+            a[RigCh.ARM_L_SH] += 18f * petPulse * wl; a[RigCh.ARM_L_WR] += 8f * petPulse * wl
+            a[RigCh.ARM_R_SH] += 18f * petPulse * wr; a[RigCh.ARM_R_WR] += 8f * petPulse * wr
             a[RigCh.MOUTH_SMILE] += 0.6f * petPulse
         }
         if (holdShown > 0f) {
@@ -1442,15 +1459,14 @@ class OrangeView(
         }
         // A pet is a cross-state additive reaction: it remains visible during idle, focus,
         // break and scenario performances without replacing their choreography.
-        val petAge = if (petAt == 0L) 2f else ((now - petAt) / 1000f).coerceAtLeast(0f)
-        val petPulse = if (petAge < 0.82f) sin(Math.PI * (petAge / 0.82f)).toFloat() else 0f
+        val petPulse = petV
         if (petPulse > 0.001f) {
             dy -= s * 0.025f * petPulse
             sx += 0.022f * petPulse
             sy -= 0.032f * petPulse
-            rot += petSide * 1.8f * petPulse
+            rot += petSideS * 1.8f * petPulse
             happyT = max(happyT, 0.72f * petPulse)
-            lookXT = petSide * 0.30f * petPulse
+            lookXT = petSideS * 0.30f * petPulse
             leafKick = max(leafKick, 0.75f * petPulse)
         }
         if (!running && move == Move.EXIT) {
@@ -1462,7 +1478,7 @@ class OrangeView(
             afterMove = null
             capturePose()
             move = nm; t0 = now; t = 0f
-            blendStarted = now; blendDuration = 320L; blendActive = nm != Move.IDLE
+            blendStarted = now; blendDuration = 320L; blendActive = true
             pose(0f); busy = false
         } else {
             busy = move == Move.EXIT || (running && move != Move.IDLE && move != Move.FOCUS &&
@@ -1607,7 +1623,7 @@ class OrangeView(
 
         // schedule the next frame: full speed only while something is actually moving
         if (attached && winVisible && isShown) {
-            val petAnimating = petAt != 0L && now - petAt < 950L
+            val petAnimating = petV > 0.002f || (petAt != 0L && now - petAt < 400L)
             val magicAnimating = magicAt != 0L && now - magicAt < 3700L
             val ambientLoop = move == Move.FOCUS || move == Move.BREAK || move == Move.SLEEP || move == Move.IDLE ||
                 move == Move.BEGGING || move == Move.DEAD || move == Move.PANIC || move == Move.CRYING ||
@@ -1852,7 +1868,7 @@ class OrangeView(
         if (move == Move.WAKE) return
         petAt = now
         petSide = if (x < width / 2f) -1f else 1f
-        petStrength = (0.55f + 0.15f * tapCount).coerceAtMost(1f)
+        petStrength = (0.8f + 0.1f * tapCount).coerceAtMost(1f)
         val combo = tapCount >= 3 && now >= comboUntil
         if (move == Move.FOCUS || move == Move.BREAK) {
             if (combo) {
