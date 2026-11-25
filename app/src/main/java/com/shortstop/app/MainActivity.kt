@@ -147,7 +147,8 @@ class MainActivity : Activity() {
     // bottom sheet
     private var sheetLayer: FrameLayout? = null
     private var sheetPanel: View? = null
-    private var sheetScrim: View? = null
+    private var sheetScrim: SheetBackdrop? = null
+    private var sheetDim = 0f
     private var sheetClose: (() -> Unit)? = null
 
     private val ticker = object : Runnable {
@@ -887,6 +888,8 @@ class MainActivity : Activity() {
             paperOn -> pal.canvas
             !forceCanvas && (tab == 0 || tab == 1) -> FocusTheme.bg(pal.dark)
             else -> pal.canvas
+        }.let { base ->
+            if (sheetDim > 0f) android.animation.ArgbEvaluator().evaluate(sheetDim, base, 0xFF140A04.toInt()) as Int else base
         }
         if (statusNow == 0) statusNow = window.statusBarColor
         if (to == statusNow) return
@@ -1047,9 +1050,10 @@ class MainActivity : Activity() {
     private fun showSheet(title: String, content: View, onClose: (() -> Unit)? = null) {
         closeSheet(false)
         val layer = FrameLayout(this)
-        val scrim = View(this).apply {
-            setBackgroundColor(Color.parseColor("#99000000"))
-            alpha = 0f
+        // blur what is behind the sheet (the real views, not the toast or sparkle layers), then dim it only gently
+        val blurTargets = (0 until rootFrame.childCount).map { rootFrame.getChildAt(it) }
+            .filter { it !== toaster && it !== spark && it !== sheetLayer }
+        val scrim = SheetBackdrop(this, blurTargets, 0x59140A04, rootFrame).apply {
             setOnClickListener { closeSheet() }
         }
         val r = dp(28).toFloat()
@@ -1074,14 +1078,14 @@ class MainActivity : Activity() {
                 MotionEvent.ACTION_MOVE -> {
                     val dy = (e.rawY - downY).coerceAtLeast(0f)
                     panel.translationY = dy
-                    scrim.alpha = (1f - dy / maxOf(1, panel.height)).coerceIn(0f, 1f)
+                    scrim.level = (1f - dy / maxOf(1, panel.height)).coerceIn(0f, 1f)
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (e.rawY - downY > dp(110)) closeSheet()
                     else {
                         panel.animate().translationY(0f).setDuration(420).setInterpolator(SpringInterpolator(16f, 0.6f, 0.8f)).start()
-                        scrim.animate().alpha(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(1.4f)).start()
+                        fadeBackdrop(scrim, 1f, 260L)
                     }
                     true
                 }
@@ -1102,12 +1106,29 @@ class MainActivity : Activity() {
         toaster?.front()
         spark?.bringToFront()
         panel.translationY = dp(700).toFloat()
-        scrim.animate().alpha(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(1.4f)).start()
+        fadeBackdrop(scrim, 1f, 320L)
+        setSheetDim(0.28f)
         panel.animate().translationY(0f).setDuration(520).setInterpolator(SpringInterpolator(14f, 0.8f, 0.9f)).start()
         sheetLayer = layer
         sheetPanel = panel
         sheetScrim = scrim
         sheetClose = onClose
+    }
+
+    private fun fadeBackdrop(b: SheetBackdrop, to: Float, ms: Long) {
+        (b.tag as? ValueAnimator)?.cancel()
+        b.tag = ValueAnimator.ofFloat(b.level, to).apply {
+            duration = ms
+            interpolator = android.view.animation.DecelerateInterpolator(1.4f)
+            addUpdateListener { b.level = it.animatedValue as Float }
+            start()
+        }
+    }
+
+    /** The status bar follows the dim of an open sheet so it never looks lighter than the screen under it. */
+    private fun setSheetDim(v: Float) {
+        sheetDim = v
+        updateStatusBar()
     }
 
     private fun closeSheet(animate: Boolean = true) {
@@ -1120,12 +1141,15 @@ class MainActivity : Activity() {
         sheetPanel = null
         sheetScrim = null
         sheetClose = null
+        setSheetDim(0f)
         if (!animate || panel == null || scrim == null) {
+            scrim?.release()
             rootFrame.removeView(layer)
             return
         }
-        scrim.animate().alpha(0f).setDuration(220).setInterpolator(android.view.animation.AccelerateDecelerateInterpolator()).start()
-        panel.animate().translationY(dp(700).toFloat()).setDuration(220).withEndAction {
+        fadeBackdrop(scrim, 0f, 240L)
+        panel.animate().translationY(dp(700).toFloat()).setDuration(240).withEndAction {
+            scrim.release()
             rootFrame.removeView(layer)
             cb?.invoke()
         }.start()
@@ -1361,7 +1385,7 @@ class MainActivity : Activity() {
         })
         // OrangeView keeps a wide canvas for speech bubbles; offset that canvas so the
         // mascot itself—not the empty bubble lane—sits in the card's top-right corner.
-        calmOrange?.translationX = dp(78).toFloat()
+        calmOrange?.translationX = dp(62).toFloat()
         runningCard = runWrap
         col.addView(runWrap, lp(matchP, wrapC).apply { topMargin = dp(18) })
 

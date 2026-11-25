@@ -574,12 +574,12 @@ class OrangeView(
                 val b = sin(t * 1.25f)
                 sy += 0.010f * b; sx -= 0.006f * b
                 rot = 0.3f * sin(t * 0.7f)
-                eyeOpenT = 0.84f; mouthMode = 1; lookYT = 0.05f
+                eyeOpenT = 0.97f; mouthMode = 1; lookYT = 0.12f
                 // Tiny asymmetric arm settling keeps the companion alive without distracting
                 // from the timer; wrists continue their own delayed micro-motion in the rig.
                 armL = 0.075f + 0.018f * sin(t * 1.05f)
                 armR = 0.082f + 0.016f * sin(t * 0.92f + 1.1f)
-                blinkQuiet = 0.45f
+                blinkQuiet = 0.8f
                 return true
             }
             Move.BREAK -> {
@@ -616,7 +616,7 @@ class OrangeView(
                 val e = exp(-6.0 * t).toFloat()
                 sy = 1f - 0.08f * e * cos(18.0 * t).toFloat() * amp; sx = 1f + (1f - sy) * 0.7f
                 rot = 4f * sin(2.0 * Math.PI * 4.0 * t).toFloat() * e * amp
-                happyT = if (t in 0.05f..0.3f) 1f else 0f
+                happyT = if (t in 0.05f..0.3f) 1f else 0f   // eased by the pose blend and the eye's own smoothing
                 leafKick = 0.5f
                 return t < 0.5f
             }
@@ -946,9 +946,11 @@ class OrangeView(
                 val br = sin(clock * 0.95f)
                 b[RigCh.HEAD_Y] = 2.4f + 0.7f * br * m; b[RigCh.HEAD_ROT] = -1.1f
                 b[RigCh.ARM_L_SH] = lL - 4f + 0.9f * br * m; b[RigCh.ARM_R_SH] = lR - 4f + 0.9f * br * m
-                b[RigCh.LID_L_COVER] = 0.10f; b[RigCh.LID_R_COVER] = 0.10f
-                b[RigCh.LID_L_TILT] = 0.20f; b[RigCh.LID_R_TILT] = 0.20f
-                b[RigCh.PUPIL_Y] = 0.04f
+                // Peaceful concentration: a whisper of upper lid, a nearly level lid line (a steep one reads as angry),
+                // identical on both eyes, and a hint of a smile so the face is calm rather than stern.
+                b[RigCh.LID_L_COVER] = 0.07f; b[RigCh.LID_R_COVER] = 0.07f
+                b[RigCh.LID_L_TILT] = 0.04f; b[RigCh.LID_R_TILT] = 0.04f
+                b[RigCh.MOUTH_SMILE] = 0.18f
                 b[RigCh.FOOT_L_X] = -1f; b[RigCh.FOOT_R_X] = 1f
             }
             Move.BREAK -> {
@@ -1621,7 +1623,8 @@ class OrangeView(
     private fun buildRing() {
         val ex = 2.0 / 2.6
         val cX = mLeft + 329f * k; val cY = mTop + 321f * k
-        val a = 345f * k; val b = 357f * k
+        // body silhouette radius + a deliberate gap, so the ring floats around Orange instead of hugging or touching him
+        val a = 392f * k; val b = 404f * k
         ringPath.reset()
         val n = 144
         for (i in 0..n) {
@@ -1647,8 +1650,8 @@ class OrangeView(
         val fade = if (holding) ((now - holdStartedAt) / 120f).coerceIn(0f, 1f) else (holdShown * 8f).coerceIn(0f, 1f)
         if (fade <= 0f) return
         val color = ringColor()
-        magicRing.color = color; magicRing.strokeWidth = 2.0f * d
-        magicRing.alpha = (44 * fade).toInt()
+        magicRing.color = color; magicRing.strokeWidth = 2.4f * d
+        magicRing.alpha = (52 * fade).toInt()
         c.drawPath(ringPath, magicRing)
         ringSeg.rewind()
         ringMeasure.getSegment(0f, ringLen * holdShown, ringSeg, true)
@@ -1827,6 +1830,47 @@ class OrangeView(
         return true
     }
 
+    // ---- repeated taps -------------------------------------------------------------------------------------------
+    // Every tap is counted and gives feedback through the pet overlay (which only adds to the pose, so it can never
+    // restart anything). A full TAP reaction starts only when none is running; the third tap in a burst is queued
+    // behind the running reaction as a GIGGLE instead of cutting it off. A cooldown stops combo spam.
+    private var tapCount = 0
+    private var comboUntil = 0L
+    private var msgUntil = 0L
+
+    private fun handleTap(x: Float, now: Long) {
+        if (move == Move.EXIT) return
+        if (now - lastTap > 1400L) tapCount = 0
+        tapCount++
+        lastTap = now
+        tapRun = tapCount
+        performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+        if (move == Move.SLEEP) {
+            if (tapCount == 1) { playThen(Move.WAKE, wakeTo); onWoke?.invoke() }
+            return
+        }
+        if (move == Move.WAKE) return
+        petAt = now
+        petSide = if (x < width / 2f) -1f else 1f
+        petStrength = (0.55f + 0.15f * tapCount).coerceAtMost(1f)
+        val combo = tapCount >= 3 && now >= comboUntil
+        if (move == Move.FOCUS || move == Move.BREAK) {
+            if (combo) {
+                tapCount = 0; comboUntil = now + 2500L
+                if (now >= msgUntil) { msgUntil = now + 12000L; say("You've got this!", 1800L, LineCat.PLAYFUL) }
+            }
+            invalidate(); return
+        }
+        if (combo) {
+            tapCount = 0; comboUntil = now + 2500L
+            if (move == Move.TAP) afterMove = Move.GIGGLE
+            else if (!busy || prio(move) <= prio(Move.TAP)) play(Move.GIGGLE, force = true)
+        } else if (move == Move.TAP || move == Move.GIGGLE) {
+            // already reacting: the pet overlay above is this tap's response
+        } else if (!busy || prio(move) <= prio(Move.TAP)) play(Move.TAP, force = true)
+        invalidate()
+    }
+
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (!interactive || !hit(e)) return false
         when (e.actionMasked) {
@@ -1872,30 +1916,7 @@ class OrangeView(
                     // The old `!busy` guard made the three-tap GIGGLE effectively unreachable:
                     // TAP lasts 500 ms, longer than the old 450 ms tap cooldown.
                     // Never interrupt a focus/break pose or a higher-priority celebration.
-                    if (now - lastTap >= 220L) {
-                        if (move == Move.FOCUS || move == Move.BREAK) {
-                            // Interactable while working: a tap gives feedback but never interrupts focus.
-                            petAt = now
-                            petSide = if (e.x < width / 2f) -1f else 1f
-                            petStrength = 1f
-                            tapRun = if (now - lastTap < 2500L) tapRun + 1 else 1
-                            if (tapRun >= 3) { tapRun = 0; say("You've got this!", 1800L, LineCat.PLAYFUL) }
-                            performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                            invalidate()
-                        } else if (move == Move.SLEEP) {
-                            performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                            playThen(Move.WAKE, wakeTo)
-                            onWoke?.invoke()
-                        } else if (move != Move.EXIT) {
-                            petAt = now
-                            petSide = if (e.x < width / 2f) -1f else 1f
-                            petStrength = 1f
-                            tapRun = if (now - lastTap < 2500L) tapRun + 1 else 1
-                            if (tapRun >= 3 && !busy) { tapRun = 0; play(Move.GIGGLE, force = true) }
-                            else if (!busy || prio(move) <= prio(Move.TAP)) play(Move.TAP, force = true)
-                        }
-                        lastTap = now
-                    }
+                    handleTap(e.x, now)
                     performClick()
                 } else if (!longFired && !dragged && move != Move.EXIT) {
                     // a longer press that was let go early is a gentle pet, not a tap
