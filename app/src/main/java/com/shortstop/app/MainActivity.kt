@@ -3972,7 +3972,9 @@ class MainActivity : Activity() {
         val fix = sCard()
         fix.sAdd(sLink("Show me around", "Meet Orange and replay the quick tour") { showTour() })
         // DEVELOPER ONLY: remove this one line (and showAnimationShowcase) before a production release.
-        fix.sAdd(sLink("Animation showcase", "Developer preview of every Orange animation. Saves nothing.") { showAnimationShowcase() })
+        // only in debuggable (test) builds, so a store release never shows a developer tool
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0)
+            fix.sAdd(sLink("Animation showcase", "Developer preview of every Orange animation. Saves nothing.") { showAnimationShowcase() })
         fix.sAdd(sRow("Accessibility service", "Needed to block Shorts and apps", sTrail(sStatus(serviceOn()))) { open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) })
         fix.sAdd(sRow("Notification access", "Lets Shortstop see notifications", sTrail(sStatus(notifAccess()))) { open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
         fix.sAdd(sRow("Usage access", "For screen time and stats", sTrail(sStatus(usageGranted()))) { open(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
@@ -3982,7 +3984,8 @@ class MainActivity : Activity() {
         fix.sAdd(sLink("Battery optimisation", "Stop the phone from closing Shortstop") {
             open(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         })
-        fix.sAdd(sLink("Xiaomi / Redmi autostart", "Let Shortstop run in the background") {
+        val brand = (android.os.Build.MANUFACTURER + " " + android.os.Build.BRAND).lowercase()
+        if (brand.contains("xiaomi") || brand.contains("redmi") || brand.contains("poco")) fix.sAdd(sLink("Xiaomi / Redmi autostart", "Let Shortstop run in the background") {
             try {
                 startActivity(Intent().setComponent(ComponentName(
                     "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")))
