@@ -1641,7 +1641,11 @@ class OrangeView(
             val moving = busy || holdShown > 0f || zzzLevel > 0.01f || petAnimating || magicAnimating || (touchHeld && !longFired) || blinkStart != 0L || abs(leafV) > 0.4f ||
                 abs(leafA - leafBias) > 0.15f || lm != null || ambientLoop
             // Keep character motion on the display frame clock; only static/offscreen states may idle.
-            if (moving) postInvalidateOnAnimation() else postInvalidateDelayed(40)
+            // A resting, sleeping Orange only breathes and drifts Zzz, so every second display frame (30 fps) looks identical
+            // and halves the work; any touch, wake, blink or reaction returns to the full frame clock at once.
+            val restingSleep = move == Move.SLEEP && !busy && holdShown <= 0f && !petAnimating && !magicAnimating && !touchHeld && lm == null
+            if (restingSleep) postInvalidateDelayed(20)
+            else if (moving) postInvalidateOnAnimation() else postInvalidateDelayed(40)
         }
     }
 

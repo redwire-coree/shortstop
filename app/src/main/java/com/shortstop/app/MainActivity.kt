@@ -2769,6 +2769,13 @@ class MainActivity : Activity() {
         visibleKeys.clear()
         appAdapter?.notifyDataSetChanged()
         updateBulk()
+        // an empty search result says so instead of leaving a blank list
+        loadingText?.let { t ->
+            if (allApps.isNotEmpty()) {
+                if (shown.isEmpty()) { t.text = if (q.isEmpty()) "No apps to show." else "No apps match \u201c$q\u201d."; t.visibility = View.VISIBLE }
+                else t.visibility = View.GONE
+            }
+        }
     }
 
     private var bulkBtn: TextView? = null
@@ -2832,7 +2839,7 @@ class MainActivity : Activity() {
 
     private inner class AppItem(ctx: Context) : FrameLayout(ctx) {
         private val icon = ImageView(ctx)
-        private val name = tv("", 16f, fonts.semi, pal.ink)
+        private val name = tv("", 16f, fonts.semi, pal.ink).apply { setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END }
         private val toggle = ToggleView(ctx)
         private val tile = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -3567,7 +3574,7 @@ class MainActivity : Activity() {
                 }
                 tile.addView(icon, lp(dp(44), dp(44)))
                 val names = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                names.addView(tv(r.label, 16f, fonts.semi, pal.ink))
+                names.addView(tv(r.label, 16f, fonts.semi, pal.ink).apply { setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END })
                 names.addView(tv(if (r.distracting) "Distracting" else "Others", 12f, fonts.regular, pal.muted).apply { setPadding(0, dp(2), 0, 0) })
                 tile.addView(names, lp(0, wrapC, 1f).apply { marginStart = dp(14) })
                 tile.addView(tv(fmtMin(r.minutes), 15f, fonts.semi, pal.ink))
@@ -3602,7 +3609,13 @@ class MainActivity : Activity() {
         ).show()
     }
 
-    private fun fmt(minutes: Int) = String.format("%02d:%02d", minutes / 60, minutes % 60)
+    /** Times follow the phone's 12/24-hour setting, the same as the picker that edits them. */
+    private fun fmt(minutes: Int): String {
+        val h = (minutes / 60) % 24; val m = minutes % 60
+        if (DateFormat.is24HourFormat(this)) return String.format("%02d:%02d", h, m)
+        val x = h % 12
+        return String.format("%d:%02d %s", if (x == 0) 12 else x, m, if (h < 12) "AM" else "PM")
+    }
 
     private fun scheduleEditor(refill: () -> Unit): View {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(4), 0, dp(14)) }
@@ -3619,12 +3632,18 @@ class MainActivity : Activity() {
             top.addView(tv("to", 13f, fonts.regular, pal.muted).apply { setPadding(dp(10), 0, dp(10), 0) })
             top.addView(pill(fmt(w.end), false) { pickTime(w.end) { m -> Store.updateWindow(this, i, w.copy(end = m)); refill() } })
             top.addView(View(this), lp(0, 1, 1f))
-            top.addView(smallBtn("✕") { if (free()) { Store.removeWindow(this, i); refill() } })
+            top.addView(smallBtn("✕") {
+                if (free()) {
+                    Store.removeWindow(this, i); refill()
+                    toast("Window removed", "${fmt(w.start)} to ${fmt(w.end)}", "Undo") { Store.addWindow(this, w); refill() }
+                }
+            }.apply { contentDescription = "Remove window ${fmt(w.start)} to ${fmt(w.end)}" })
             c.addView(top)
             val days = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, 0) }
             "MTWTFSS".forEachIndexed { d, ch ->
                 val on = ((w.days shr d) and 1) == 1
                 val chip = pill(ch.toString(), on) {}
+                chip.contentDescription = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")[d]
                 chip.textSize = 12f
                 chip.setPadding(dp(4), dp(9), dp(4), dp(9))
                 var sel = on
