@@ -2,6 +2,8 @@ package com.shortstop.app
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
@@ -134,6 +136,7 @@ class OrangeBubble(
     fun show(text: String, category: LineCat, durationMs: Long) {
         removeCallbacks(autoHide)
         val host = hostView() ?: return
+        if (removalQueued) { mainHandler.removeCallbacks(removal); removalQueued = false; detach(); visibility = VISIBLE }
         val firstTime = parent == null || leaving
         cat = category
         current = text
@@ -196,6 +199,25 @@ class OrangeBubble(
         leaving = false
         detach()
     }
+
+    /**
+     * For lifecycle callbacks (window hidden, Orange detached or hidden). Those run while the window's root view is
+     * looping over its children, and removing a child there shrinks the list under the loop, which is what crashed
+     * the app when it went to the background. So here the box is only hidden; the real removal happens afterwards.
+     */
+    fun dismissSafely() {
+        removeCallbacks(autoHide)
+        appearAnim?.cancel(); morphAnim?.cancel()
+        leaving = false; appear = 0f
+        visibility = INVISIBLE
+        if (parent != null && !removalQueued) {
+            removalQueued = true
+            mainHandler.post(removal)
+        }
+    }
+    private var removalQueued = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val removal = Runnable { removalQueued = false; detach(); visibility = VISIBLE }
 
     private fun detach() {
         (parent as? ViewGroup)?.removeView(this)

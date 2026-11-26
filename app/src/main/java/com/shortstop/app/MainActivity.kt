@@ -2519,7 +2519,8 @@ class MainActivity : Activity() {
                         schedCol?.let { col -> for (k in 0 until col.childCount) popIn(col.getChildAt(k), 40L + k * 70L) }
                     }, done = {
                         // always give the real screen back, whichever way the transition ended
-                        (blur.parent as? ViewGroup)?.removeView(blur)
+                        // not synchronously: when the window is torn down this runs inside the root view's detach loop
+                        android.os.Handler(android.os.Looper.getMainLooper()).post { (blur.parent as? ViewGroup)?.removeView(blur) }
                         content.visibility = View.VISIBLE
                         busy = false
                         updateStatusBar()

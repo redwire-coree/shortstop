@@ -427,11 +427,11 @@ class OrangeView(
 
     // ---- lifecycle
     override fun onAttachedToWindow() { super.onAttachedToWindow(); attached = true; lastFrame = 0L; invalidate() }
-    override fun onDetachedFromWindow() { attached = false; removeCallbacks(longPress); sayToken++; bubble?.dismissNow(); super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { attached = false; removeCallbacks(longPress); sayToken++; bubble?.dismissSafely(); super.onDetachedFromWindow() }
     override fun onWindowVisibilityChanged(v: Int) {
         super.onWindowVisibilityChanged(v)
         winVisible = v == VISIBLE
-        if (winVisible) { lastFrame = 0L; invalidate() } else { sayToken++; bubble?.dismissNow() }
+        if (winVisible) { lastFrame = 0L; invalidate() } else { sayToken++; bubble?.dismissSafely() }
     }
 
     override fun onMeasure(w: Int, h: Int) { setMeasuredDimension(vw.toInt(), vh.toInt()) }
@@ -443,7 +443,7 @@ class OrangeView(
     // A speech box belongs to a visible Orange: when he is hidden or the window goes to the background, the box goes too.
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
-        if (visibility != VISIBLE) { sayToken++; bubble?.dismissNow() }
+        if (visibility != VISIBLE) { sayToken++; bubble?.dismissSafely() }
     }
 
     override fun layout(l: Int, t: Int, r: Int, b: Int) { super.layout(l - padL.toInt(), t, r, b) }
@@ -455,6 +455,15 @@ class OrangeView(
     private fun land(kk: Float, a: Float): Float = a * exp(-6.0 * kk).toFloat() * cos(15.0 * kk).toFloat()
 
     private fun sm(x: Float) = x * x * (3f - 2f * x)
+    private fun hash01(x: Float): Float { val v = sin(x.toDouble()) * 43758.5453; return (v - Math.floor(v)).toFloat() }
+
+    private val OVL_X = floatArrayOf(-0.8f, 0.7f, -0.3f, 0.8f, -0.7f, 0.3f, 0.6f, -0.5f)
+    private val OVL_Y = floatArrayOf(-0.4f, 0.2f, -0.6f, 0.1f, 0.4f, -0.3f, 0.5f, -0.1f)
+    private val fxPath = Path()
+    private val VIC_LAND = floatArrayOf(1.08f, 2.05f, 2.95f)
+    private val VIC_TAKEOFF = floatArrayOf(0.42f, 1.5f, 2.5f)
+    private val VIC_COUNT = intArrayOf(16, 10, 7)
+    private val CONFETTI = intArrayOf(0xFFFFA23A.toInt(), 0xFF8ED8A6.toInt(), 0xFFFFE08A.toInt(), 0xFFFF7A66.toInt())
 
     /** Sets the pose for move time t (seconds). Returns true while a finite move is still playing. */
     private fun pose(t: Float): Boolean {
@@ -777,36 +786,56 @@ class OrangeView(
                 return t < 2.4f
             }
             Move.CRYING -> {
-                val sob = abs(sin(t * 4.2f))
-                rot = 4f + 1.2f * sin(t * 2.1f); dy = s * 0.025f * sob
-                sx = 1f - 0.018f * sob; sy = 1f + 0.012f * sob
-                eyeOpenT = 0.55f + 0.08f * sob; happyT = 0f; mouthMode = 2
-                armL = 0.22f + 0.04f * sob; armR = 0.22f + 0.04f * sob
-                leafBiasT = -9f; blinkQuiet = 0.28f
-                return true
+                // sobbing: a slow lean-in, and every 1.6 s a quick hitch of the chest, then a sniff to finish
+                val env = sm((t / 0.5f).coerceIn(0f, 1f)) * (1f - sm(((t - 3.6f) / 0.55f).coerceIn(0f, 1f)))
+                val heave = bump(t % 1.6f, 0f, 0.32f) * env
+                rot = (3.5f + 1.0f * sin(t * 2.0f)) * env * amp
+                dy = s * 0.012f * heave; sy = 1f + 0.016f * heave - 0.012f * env; sx = 1f - 0.008f * heave + 0.006f * env
+                leafBiasT = -8f * env; blinkQuiet = 0f
+                return t < 4.2f
             }
             Move.FINAL_BOSS -> {
-                val pulse = sin(t * 2.7f)
-                rot = -3f + pulse * 1.1f; sy = 1.02f + 0.012f * pulse; sx = 0.99f
-                eyeOpenT = 0.78f; pupilT = 1.2f; lookYT = 0.12f; mouthMode = 1
-                armL = 0.68f; armR = 0.68f; leafBiasT = 8f; spark = 0.35f + 0.25f * abs(pulse)
-                return true
+                // anticipation (breathe in and sink), burst (up and out), roar and tremble, then let the air out
+                val env = sm((t / 0.4f).coerceIn(0f, 1f)) * (1f - sm(((t - 3.5f) / 0.7f).coerceIn(0f, 1f)))
+                val sink = sm((t / 0.5f).coerceIn(0f, 1f)) * (1f - sm(((t - 0.5f) / 0.1f).coerceIn(0f, 1f)))
+                val burst = bump(t, 0.52f, 0.95f)
+                val shake = sm(((t - 0.7f) / 0.3f).coerceIn(0f, 1f)) * (1f - sm(((t - 3.2f) / 0.5f).coerceIn(0f, 1f)))
+                sy = 1f - 0.055f * sink + 0.05f * burst + 0.008f * sin(t * 17f) * shake
+                sx = 1f + 0.03f * sink - 0.025f * burst
+                dy = s * 0.035f * burst
+                rot = (-1.8f * env + 1.2f * sin(t * 34f) * shake) * amp
+                leafBiasT = 6f * env; blinkQuiet = 0f
+                return t < 4.2f
             }
             Move.OVERLOAD -> {
-                val wobble = sin(t * 7.5f)
-                rot = wobble * 8f * amp; sx = 1f + 0.045f * abs(wobble); sy = 1f - 0.055f * abs(wobble)
-                eyeOpenT = 1.18f; pupilT = 0.22f; mouthMode = 2
-                armL = 0.58f + 0.16f * wobble; armR = 0.58f - 0.16f * wobble
-                leafKick = 0.9f; thinking = true
-                return true
+                // too much input: head buzzes, eyes scan faster and faster, then everything slumps and resets
+                val env = sm((t / 0.4f).coerceIn(0f, 1f)) * (1f - sm(((t - 3.8f) / 0.4f).coerceIn(0f, 1f)))
+                val frantic = 1f + sm(((t - 1.6f) / 0.5f).coerceIn(0f, 1f))
+                val slump = sm(((t - 3.0f) / 0.5f).coerceIn(0f, 1f)) * (1f - sm(((t - 3.8f) / 0.4f).coerceIn(0f, 1f)))
+                rot = (2.6f * frantic * sin(t * 5.2f) * (1f - slump) + 4f * slump) * env * amp
+                val b2 = abs(sin(t * 10.4f))
+                dy = s * 0.007f * b2 * frantic * (1f - slump); sy = 1f - 0.01f * b2 * frantic - 0.02f * slump
+                sx = 1f + 0.006f * b2 * frantic + 0.012f * slump
+                blinkQuiet = 0f
+                return t < 4.2f
             }
             Move.VICTORY -> {
-                val pulse = sin(t * 5f)
-                dy = s * (0.035f + 0.025f * (0.5f + 0.5f * pulse))
-                sx = 1f - 0.018f * abs(pulse); sy = 1f + 0.025f * abs(pulse)
-                rot = 2.5f * sin(t * 2.5f); happyT = 1f; eyeOpenT = 1.05f
-                armL = 0.78f; armR = 0.78f; leafKick = 0.6f; stars = 0.85f
-                return true
+                // crouch, three jumps that get smaller, arms up the whole time, then settle with a happy wiggle
+                fun par(a: Float, b: Float) = if (t <= a || t >= b) 0f else { val u = (t - a) / (b - a); 4f * u * (1f - u) }
+                val p1 = par(0.42f, 1.08f); val p2 = par(1.5f, 2.05f); val p3 = par(2.5f, 2.95f)
+                val crouch = sm((t / 0.35f).coerceIn(0f, 1f)) * (1f - sm(((t - 0.35f) / 0.1f).coerceIn(0f, 1f)))
+                val cheer = sm(((t - 0.35f) / 0.25f).coerceIn(0f, 1f)) * (1f - sm(((t - 3.4f) / 0.5f).coerceIn(0f, 1f)))
+                dy = s * (0.17f * p1 + 0.11f * p2 + 0.06f * p3)
+                sy = 1f - 0.09f * crouch + 0.06f * (p1 + p2 * 0.7f + p3 * 0.5f)
+                sx = 1f + 0.045f * crouch - 0.03f * (p1 + p2 * 0.7f + p3 * 0.5f)
+                for (lt in VIC_LAND) {
+                    val kk = t - lt
+                    if (kk in 0f..0.5f) { val q = land(kk, if (lt < 1.5f) 0.10f else if (lt < 2.5f) 0.07f else 0.05f); sy -= q; sx += q * 0.5f }
+                }
+                rot = 3f * sin(t * 7f) * cheer * amp
+                happyT = if (t > 0.3f && t < 3.75f) 1f else 0f
+                leafKick = 0.5f * cheer; blinkQuiet = 0f
+                return t < 4.2f
             }
             Move.IDLE -> {
                 val b = sin(t * 1.85f)   // ~3.4 s breath
@@ -1071,6 +1100,79 @@ class OrangeView(
                 b[RigCh.ARM_R_EL] += 15f * ph * (lR / 70f).coerceIn(0f, 1f); b[RigCh.ARM_R_WR] += 22f * lagged * (lR / 70f).coerceIn(0f, 1f)
                 b[RigCh.ARM_L_EL] += 15f * ph * (lL / 70f).coerceIn(0f, 1f); b[RigCh.ARM_L_WR] += 22f * lagged * (lL / 70f).coerceIn(0f, 1f)
                 b[RigCh.HEAD_ROT] = 2.5f * sin(w * tt - 0.4f) * (lR / 70f).coerceIn(0f, 1f)
+            }
+            Move.CRYING -> {
+                val env = sm((tt / 0.5f).coerceIn(0f, 1f)) * (1f - sm(((tt - 3.6f) / 0.55f).coerceIn(0f, 1f)))
+                val heave = bump(tt % 1.6f, 0f, 0.32f) * env
+                val wipe = sm(((tt - 1.1f) / 0.35f).coerceIn(0f, 1f)) * (1f - sm(((tt - 2.7f) / 0.4f).coerceIn(0f, 1f)))
+                b[RigCh.LID_L_TILT] = -0.85f * env; b[RigCh.LID_R_TILT] = -0.85f * env
+                b[RigCh.LID_L_COVER] = 0.10f * env; b[RigCh.LID_R_COVER] = 0.10f * env
+                b[RigCh.PUPIL_SCALE] = 1f + 0.14f * env; b[RigCh.PUPIL_Y] = 0.30f * env
+                b[RigCh.MOUTH_SMILE] = -1f * env
+                b[RigCh.HEAD_Y] = 3f * env + 2.2f * heave; b[RigCh.HEAD_ROT] = 4f * env
+                b[RigCh.ARM_R_SH] = 78f * wipe + 8f * env * (1f - wipe); b[RigCh.ARM_R_EL] = 72f * wipe
+                b[RigCh.ARM_R_WR] = 14f * sin(tt * 16f) * wipe
+                b[RigCh.ARM_L_SH] = 10f * env + 3f * heave; b[RigCh.ARM_L_EL] = 6f * env
+                b[RigCh.LEAF_BEND] = -3f * heave
+            }
+            Move.FINAL_BOSS -> {
+                val env = sm((tt / 0.4f).coerceIn(0f, 1f)) * (1f - sm(((tt - 3.5f) / 0.7f).coerceIn(0f, 1f)))
+                val sink = sm((tt / 0.5f).coerceIn(0f, 1f)) * (1f - sm(((tt - 0.5f) / 0.1f).coerceIn(0f, 1f)))
+                val burst = bump(tt, 0.52f, 0.95f)
+                val shake = sm(((tt - 0.7f) / 0.3f).coerceIn(0f, 1f)) * (1f - sm(((tt - 3.2f) / 0.5f).coerceIn(0f, 1f)))
+                val shout = (bump(tt, 0.5f, 1.05f) + bump(tt, 2.0f, 2.5f)).coerceIn(0f, 1f)
+                val ang = sm((tt / 0.35f).coerceIn(0f, 1f)) * (1f - sm(((tt - 3.7f) / 0.5f).coerceIn(0f, 1f)))
+                // the one angry brow: inner corners down, lids pressed in, small hard pupils
+                b[RigCh.LID_L_TILT] = 1f * ang; b[RigCh.LID_R_TILT] = 1f * ang
+                b[RigCh.LID_L_COVER] = 0.20f * ang; b[RigCh.LID_R_COVER] = 0.20f * ang
+                b[RigCh.PUPIL_SCALE] = 1f - 0.22f * ang; b[RigCh.PUPIL_Y] = 0.10f * ang
+                b[RigCh.MOUTH_SMILE] = -1f * ang * (1f - shout); b[RigCh.MOUTH_OPEN] = 1f + 0.45f * shout
+                b[RigCh.HEAD_Y] = 4f * sink - 2f * burst + 1f * env
+                b[RigCh.HEAD_ROT] = -2f * env + 1.5f * sin(tt * 34f) * shake
+                val fist = 1f - env
+                b[RigCh.ARM_L_SH] = 18f * env + 10f * sin(tt * 11f) * shake - 8f * sink
+                b[RigCh.ARM_R_SH] = 18f * env + 10f * sin(tt * 11f + 1.6f) * shake - 8f * sink
+                b[RigCh.ARM_L_EL] = 52f * env; b[RigCh.ARM_R_EL] = 52f * env
+                b[RigCh.ARM_L_HAND] = fist; b[RigCh.ARM_R_HAND] = fist
+                b[RigCh.FOOT_L_X] = -3f * env; b[RigCh.FOOT_R_X] = 3f * env
+                b[RigCh.LEAF_BEND] = 6f * sin(tt * 30f) * shake
+            }
+            Move.OVERLOAD -> {
+                val env = sm((tt / 0.4f).coerceIn(0f, 1f)) * (1f - sm(((tt - 3.8f) / 0.4f).coerceIn(0f, 1f)))
+                val frantic = sm(((tt - 1.6f) / 0.5f).coerceIn(0f, 1f))
+                val slump = sm(((tt - 3.0f) / 0.5f).coerceIn(0f, 1f)) * (1f - sm(((tt - 3.8f) / 0.4f).coerceIn(0f, 1f)))
+                // eyes keep their normal shape and size; they scan in quick, symmetric jumps that speed up
+                val rate = 3.2f + 2.3f * frantic
+                val idx = (tt * rate).toInt() and 7
+                val px = OVL_X[idx]; val py = OVL_Y[idx]
+                val scan = env * (1f - slump)
+                b[RigCh.PUPIL_X] = px * 0.85f * scan; b[RigCh.PUPIL_Y] = py * 0.7f * scan
+                b[RigCh.PUPIL_SCALE] = 1f - 0.22f * scan
+                b[RigCh.LID_L_TILT] = -0.55f * env - 0.2f * slump; b[RigCh.LID_R_TILT] = -0.55f * env - 0.2f * slump
+                b[RigCh.LID_L_COVER] = 0.55f * slump; b[RigCh.LID_R_COVER] = 0.55f * slump
+                b[RigCh.MOUTH_SMILE] = -0.9f * env
+                val hug = env * (1f - 0.6f * slump)
+                val buzz = sin(tt * 21f) * (1f + frantic) * (1f - slump) * env
+                b[RigCh.ARM_L_SH] = 118f * hug + 3.5f * buzz; b[RigCh.ARM_R_SH] = 118f * hug - 3.5f * buzz
+                b[RigCh.ARM_L_EL] = 60f * hug; b[RigCh.ARM_R_EL] = 60f * hug
+                b[RigCh.ARM_L_HAND] = 1f - 0.5f * env; b[RigCh.ARM_R_HAND] = 1f - 0.5f * env
+                b[RigCh.HEAD_Y] = 5f * slump; b[RigCh.HEAD_ROT] = 5f * slump
+                b[RigCh.LEAF_BEND] = 3f * buzz
+            }
+            Move.VICTORY -> {
+                fun par(a: Float, bb: Float) = if (tt <= a || tt >= bb) 0f else { val u = (tt - a) / (bb - a); 4f * u * (1f - u) }
+                val air = max(par(0.42f, 1.08f), max(par(1.5f, 2.05f), par(2.5f, 2.95f)))
+                val crouch = sm((tt / 0.35f).coerceIn(0f, 1f)) * (1f - sm(((tt - 0.35f) / 0.1f).coerceIn(0f, 1f)))
+                val cheer = sm(((tt - 0.35f) / 0.25f).coerceIn(0f, 1f)) * (1f - sm(((tt - 3.4f) / 0.5f).coerceIn(0f, 1f)))
+                val armUp = sm(((tt - 0.35f) / 0.18f).coerceIn(0f, 1f)) * (1f - sm(((tt - 3.2f) / 0.6f).coerceIn(0f, 1f)))
+                b[RigCh.ARM_L_SH] = 128f * armUp + 20f * sin(tt * 9f) * armUp - 18f * crouch
+                b[RigCh.ARM_R_SH] = 128f * armUp + 20f * sin(tt * 9f + 1.3f) * armUp - 18f * crouch
+                b[RigCh.ARM_L_EL] = 10f * armUp; b[RigCh.ARM_R_EL] = 10f * armUp
+                b[RigCh.ARM_L_WR] = 12f * sin(tt * 9f) * armUp; b[RigCh.ARM_R_WR] = 12f * sin(tt * 9f + 1.3f) * armUp
+                b[RigCh.HEAD_ROT] = 4f * sin(tt * 7f) * cheer; b[RigCh.HEAD_Y] = 3f * crouch - 2f * cheer
+                b[RigCh.MOUTH_SMILE] = 0.9f * cheer
+                b[RigCh.MOUTH_OPEN] = 1f + 0.45f * sm((air / 0.3f).coerceIn(0f, 1f))
+                b[RigCh.LEAF_BEND] = 8f * sin(tt * 14f) * cheer
             }
             Move.CHEER, Move.CELEBRATE, Move.VICTORY, Move.HOP -> {
                 val up = ((lL + lR) / 160f).coerceIn(0f, 1f)
@@ -1345,70 +1447,101 @@ class OrangeView(
                 }
             }
             Move.CRYING -> {
-                fx.color = 0xFF56B8F4.toInt()
-                val wob = sin(phase*4.2f)
-                for (side in -1..1 step 2) {
-                    val x = cx0 + side*s*.22f
-                    // Each tear falls, fades, and respawns on a staggered phase for a seamless loop.
-                    val fall = ((phase * 0.72f + (if (side < 0) 0f else 0.48f)) % 1f + 1f) % 1f
-                    val y = top+s*(.37f + .16f * fall + .012f*wob)
-                    fx.alpha = (235f * (1f - 0.12f * fall)).toInt().coerceIn(0,255)
-                    val tear = Path().apply { moveTo(x,y); cubicTo(x-side*s*.10f,y+s*.12f,x+side*s*.10f,y+s*.17f,x,y+s*.22f); cubicTo(x-side*s*.08f,y+s*.17f,x+side*s*.08f,y+s*.12f,x,y); close() }
-                    c.drawPath(tear,fx)
-                    fx.alpha = 255
+                // two small tears per eye-side, staggered, each a round drop with a pointed top that gathers and rolls down the cheek
+                val env = sm(((t - 0.3f) / 0.5f).coerceIn(0f, 1f)) * (1f - sm(((t - 3.5f) / 0.5f).coerceIn(0f, 1f)))
+                val wipe = sm(((t - 1.1f) / 0.35f).coerceIn(0f, 1f)) * (1f - sm(((t - 2.7f) / 0.4f).coerceIn(0f, 1f)))
+                if (env > 0.01f) for (side in -1..1 step 2) {
+                    val x = cx0 + side * s * 0.205f
+                    val own = if (side > 0) 1f - 0.85f * wipe else 1f   // the wiped side stays dry for a moment
+                    for (n in 0..1) {
+                        val p = (((t - 0.3f) / 1.5f + n * 0.5f + (if (side < 0) 0f else 0.23f)) % 1f + 1f) % 1f
+                        val y = mTop + s * (0.50f + 0.17f * p * p)
+                        val r = s * 0.019f * sm((p / 0.2f).coerceIn(0f, 1f))
+                        val a = env * own * (sm((p / 0.1f).coerceIn(0f, 1f))) * (1f - sm(((p - 0.72f) / 0.28f).coerceIn(0f, 1f)))
+                        if (r <= 0.5f || a <= 0.01f) continue
+                        fxPath.reset(); fxPath.moveTo(x, y - r * 2.3f); fxPath.lineTo(x - r * 0.9f, y - r * 0.45f); fxPath.lineTo(x + r * 0.9f, y - r * 0.45f); fxPath.close()
+                        fx.color = 0xFF7CC8F5.toInt(); fx.alpha = (230f * a).toInt().coerceIn(0, 255)
+                        c.drawPath(fxPath, fx); c.drawCircle(x, y, r, fx)
+                        fx.color = 0xFFEAF7FF.toInt(); fx.alpha = (200f * a).toInt().coerceIn(0, 255)
+                        c.drawCircle(x - r * 0.3f, y - r * 0.3f, r * 0.3f, fx)
+                    }
                 }
+                fx.alpha = 255
             }
             Move.FINAL_BOSS -> {
-                // Stylized flame tongues, pulsing at different phases for continuous motion.
-                for (i in 0..6) {
-                    val x = cx0 - s*.43f + i*s*.14f
-                    val h = s*(.13f + .07f*(.5f+.5f*sin(phase*5f+i*1.7f)))
-                    val y = bottom - s*.05f
-                    val flame = Path().apply { moveTo(x-s*.045f,y); cubicTo(x-s*.10f,y-h*.35f,x+s*.03f,y-h*.65f,x,y-h); cubicTo(x+s*.10f,y-h*.58f,x+s*.10f,y-h*.22f,x+s*.045f,y); close() }
-                    fx.color = if (i%2==0) 0xFFFF8B35.toInt() else 0xFFFFB34F.toInt(); c.drawPath(flame,fx)
-                    fx.color = 0xFFFFD27A.toInt(); c.drawOval(x-s*.018f,y-h*.42f,x+s*.018f,y-s*.015f,fx)
+                val vein = sm(((t - 0.5f) / 0.12f).coerceIn(0f, 1f)) * (1f - sm(((t - 3.5f) / 0.3f).coerceIn(0f, 1f)))
+                if (vein > 0.01f) {
+                    // the classic anger mark on the brow: four curved wedges that pulse with the shaking
+                    val r = s * 0.052f * vein * (1f + 0.10f * sin(t * 14f))
+                    val vx = cx0 + s * 0.27f; val vy = mTop + s * 0.20f
+                    stroke.color = 0xFFE5392B.toInt(); stroke.strokeWidth = r * 0.30f
+                    stroke.strokeCap = Paint.Cap.ROUND
+                    for (a in -1..1 step 2) for (b in -1..1 step 2) {
+                        fxPath.reset()
+                        fxPath.moveTo(vx + a * r * 0.22f, vy + b * r)
+                        fxPath.quadTo(vx + a * r * 0.22f, vy + b * r * 0.22f, vx + a * r, vy + b * r * 0.22f)
+                        c.drawPath(fxPath, stroke)
+                    }
+                    stroke.strokeCap = Paint.Cap.ROUND
                 }
-                // Rising embers use fixed phase offsets: smooth, repeatable, allocation-free particles.
-                for (i in 0..8) {
-                    val p = ((phase * 0.42f + i * 0.137f) % 1f + 1f) % 1f
-                    val x = cx0 + sin(phase * 2.1f + i * 2.4f) * s * (.25f + .025f * i)
-                    val y = bottom - s * (.08f + p * .56f)
-                    fx.color = if (i % 2 == 0) 0xFFFFD27A.toInt() else 0xFFFF9B43.toInt()
-                    fx.alpha = (220f * (1f - p)).toInt().coerceIn(0,255)
-                    c.drawCircle(x,y,s*(.009f + .004f*(i%3)),fx)
+                // heat steam: soft cream puffs lifting off both sides of the head while he roars
+                val steam = sm(((t - 0.6f) / 0.4f).coerceIn(0f, 1f)) * (1f - sm(((t - 3.3f) / 0.5f).coerceIn(0f, 1f)))
+                if (steam > 0.01f) for (side in -1..1 step 2) for (i in 0..2) {
+                    val p = ((t * 0.9f + i / 3f + (if (side < 0) 0.17f else 0f)) % 1f + 1f) % 1f
+                    val x = cx0 + side * s * (0.36f + 0.025f * sin(t * 3f + i * 2f)) 
+                    val y = mTop + s * (0.34f - 0.24f * p)
+                    fx.color = 0xFFFFE9D6.toInt(); fx.alpha = (150f * steam * sin(Math.PI * p).toFloat()).toInt().coerceIn(0, 255)
+                    c.drawCircle(x, y, s * (0.022f + 0.03f * p), fx)
                 }
                 fx.alpha = 255
             }
             Move.OVERLOAD -> {
-                fx.color = 0xFF9AA3AD.toInt()
-                for (i in 0..3) {
-                    val ph = phase*1.4f+i*1.55f
-                    val x = cx0 + sin(ph)*s*.31f
-                    val y = top + s*(.08f + .035f*cos(ph*1.3f))
-                    val rr = s*(.045f+.012f*(i%2))
-                    c.drawCircle(x,y,rr,fx)
-                }
-                stroke.color = 0xFF56616C.toInt(); stroke.strokeWidth = s*.025f
-                for (side in -1..1 step 2) {
-                    val x = cx0+side*s*.20f; val y=top+s*.40f
-                    val spiral=Path().apply { moveTo(x,y); for (j in 1..18) { val a=j*.48f; val rr=s*.006f*j; lineTo(x+cos(a)*rr,y+sin(a)*rr) } }
-                    c.drawPath(spiral,stroke)
+                val env = sm((t / 0.4f).coerceIn(0f, 1f)) * (1f - sm(((t - 3.0f) / 0.5f).coerceIn(0f, 1f)))
+                val frantic = 1f + sm(((t - 1.6f) / 0.5f).coerceIn(0f, 1f))
+                if (env > 0.01f) {
+                    // buzzing: thin arcs ripple outward from both sides of the head, faster as it gets worse
+                    stroke.color = 0xFF9A8576.toInt(); stroke.strokeWidth = s * 0.014f; stroke.strokeCap = Paint.Cap.ROUND
+                    val ccx = cx0; val ccy = mTop + s * 0.50f
+                    for (i in 0..2) {
+                        val p = ((t * 0.9f * frantic + i / 3f) % 1f + 1f) % 1f
+                        val rr = s * (0.47f + 0.12f * p)
+                        stroke.alpha = (210f * env * (1f - p)).toInt().coerceIn(0, 255)
+                        rect.set(ccx - rr, ccy - rr, ccx + rr, ccy + rr)
+                        c.drawArc(rect, -28f, 56f, false, stroke)
+                        c.drawArc(rect, 152f, 56f, false, stroke)
+                    }
+                    stroke.alpha = 255; stroke.strokeCap = Paint.Cap.ROUND
+                    // one sweat drop sliding down the temple
+                    val q = ((t * 0.8f) % 1f + 1f) % 1f
+                    val dx = cx0 + s * 0.30f; val dyy = mTop + s * (0.30f + 0.14f * q * q)
+                    val dr = s * 0.016f
+                    val da = env * sm((q / 0.15f).coerceIn(0f, 1f)) * (1f - sm(((q - 0.75f) / 0.25f).coerceIn(0f, 1f)))
+                    fxPath.reset(); fxPath.moveTo(dx, dyy - dr * 2.3f); fxPath.lineTo(dx - dr * 0.9f, dyy - dr * 0.45f); fxPath.lineTo(dx + dr * 0.9f, dyy - dr * 0.45f); fxPath.close()
+                    fx.color = 0xFF7CC8F5.toInt(); fx.alpha = (230f * da).toInt().coerceIn(0, 255)
+                    c.drawPath(fxPath, fx); c.drawCircle(dx, dyy, dr, fx)
+                    fx.alpha = 255
                 }
             }
             Move.VICTORY -> {
-                val crownY = top - s*.015f + s*.018f*sin(phase*3f)
-                val crown = Path().apply { moveTo(cx0-s*.25f,crownY+s*.12f); lineTo(cx0-s*.30f,crownY-s*.05f); lineTo(cx0-s*.13f,crownY+s*.02f); lineTo(cx0,crownY-s*.14f); lineTo(cx0+s*.13f,crownY+s*.02f); lineTo(cx0+s*.30f,crownY-s*.05f); lineTo(cx0+s*.25f,crownY+s*.12f); close() }
-                fx.color = 0xFFFFC34F.toInt(); c.drawPath(crown,fx)
-                fx.color = 0xFFFFF0B3.toInt()
-                for (i in 0..4) { val a=phase*1.3f+i*1.256f; val x=cx0+cos(a)*s*.58f; val y=top+s*(.32f+sin(a*1.7f)*.18f); c.drawCircle(x,y,s*.018f,fx) }
-                // Confetti drifts down on offset loops instead of flashing in place.
-                for (i in 0..11) {
-                    val p = ((phase * .30f + i * .083f) % 1f + 1f) % 1f
-                    val x = cx0 + sin(i * 4.1f + phase * .7f) * s * (.30f + (i % 4) * .07f)
-                    val y = top + s * (.10f + p * .62f)
-                    fx.alpha = (210f * (1f - p)).toInt().coerceIn(0,255)
-                    fx.color = if (i % 2 == 0) 0xFFFFB34F.toInt() else 0xFF8ED8A6.toInt()
-                    c.drawCircle(x,y,s*.012f,fx)
+                // confetti bursts from the head at each take-off; deterministic, no particle objects
+                val takeoffs = VIC_TAKEOFF; val counts = VIC_COUNT; val cols = CONFETTI
+                for (bi in 0..2) {
+                    val u = t - takeoffs[bi]
+                    if (u < 0f || u > 1.4f) continue
+                    val ox = cx0; val oy = mTop + s * 0.28f
+                    for (j in 0 until counts[bi]) {
+                        val h1 = hash01(j * 12.9898f + bi * 78.233f); val h2 = hash01(j * 39.346f + bi * 11.135f); val h3 = hash01(j * 7.17f + bi * 3.7f)
+                        val ang = -1.5708f + (h1 - 0.5f) * 2.5f
+                        val v = s * (0.8f + 0.8f * h2)
+                        val x = ox + cos(ang) * v * (1f - exp(-2.5f * u)) / 2.5f
+                        val y = oy + sin(ang) * v * (1f - exp(-2.5f * u)) / 2.5f + 0.5f * s * 1.3f * u * u
+                        val a = if (u < 0.9f) 1f else (1f - (u - 0.9f) / 0.5f).coerceIn(0f, 1f)
+                        fx.color = cols[j % 4]; fx.alpha = (235f * a).toInt().coerceIn(0, 255)
+                        c.save(); c.translate(x, y); c.rotate((u * (240f + h3 * 400f) + h1 * 360f))
+                        val w = s * (0.011f + 0.006f * h3)
+                        c.drawRect(-w, -w * 0.5f, w, w * 0.5f, fx)
+                        c.restore()
+                    }
                 }
                 fx.alpha = 255
             }
