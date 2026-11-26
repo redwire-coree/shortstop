@@ -47,14 +47,16 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette, private val rich: 
         val bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
         val rnd = java.util.Random(7)
         val px = IntArray(n * n)
+        // The same film grain as before, but as plain light and dark specks (alpha = how far from mid grey) drawn with
+        // normal blending. The old OVERLAY blend forced the GPU to read the whole screen back every frame.
+        val gain = if (pal.dark) 0.16f else 0.11f
         for (i in px.indices) {
             val v = rnd.nextInt(256)
-            px[i] = Color.argb(255, v, v, v)
+            val a = (Math.abs(v - 128) * 2 * gain).toInt().coerceIn(0, 255)
+            px[i] = if (v > 128) Color.argb(a, 255, 255, 255) else Color.argb(a, 0, 0, 0)
         }
         bmp.setPixels(px, 0, n, 0, 0, n, n)
         grain.shader = BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-        grain.alpha = if (pal.dark) 16 else 11
-        grain.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.OVERLAY)
     }
 
     private fun build(w: Float) {
@@ -73,6 +75,34 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette, private val rich: 
         )
         glowA.shader = shA
         glowB.shader = shB
+        for (i in ORBS.indices) {
+            val rr = w * ORBS[i][4]
+            orbPaints[i].shader = RadialGradient(0f, 0f, rr,
+                Color.argb(if (pal.dark) 70 else 62, 255, 122, 43), Color.argb(0, 255, 122, 43), Shader.TileMode.CLAMP)
+        }
+    }
+
+    private val orbPaints = Array(4) { Paint(Paint.ANTI_ALIAS_FLAG) }
+
+    private companion object {
+        // constant tables: nothing here is allocated per frame any more
+        val RADII_RICH = floatArrayOf(46f, 92f, 38f, 70f, 64f, 84f, 44f, 76f, 58f, 96f)
+        val RADII_LITE = floatArrayOf(46f, 92f, 38f, 70f)
+        val SPOTS_RICH = arrayOf(
+            floatArrayOf(0.06f, 0.08f, 9.0f, 0f), floatArrayOf(-0.02f, 0.50f, 11.0f, 1.7f),
+            floatArrayOf(0.98f, 0.24f, 8.0f, 3.1f), floatArrayOf(0.96f, 0.78f, 12.0f, 4.4f),
+            floatArrayOf(0.52f, 0.04f, 10.0f, 2.2f), floatArrayOf(0.18f, 0.88f, 13.0f, 0.9f),
+            floatArrayOf(0.74f, 0.52f, 9.5f, 5.0f), floatArrayOf(0.30f, 0.30f, 11.5f, 3.6f),
+            floatArrayOf(0.64f, 0.94f, 10.5f, 1.2f), floatArrayOf(0.02f, 0.70f, 12.5f, 2.8f)
+        )
+        val SPOTS_LITE = arrayOf(
+            floatArrayOf(0.06f, 0.10f, 9.0f, 0f), floatArrayOf(-0.02f, 0.52f, 11.0f, 1.7f),
+            floatArrayOf(0.98f, 0.30f, 8.0f, 3.1f), floatArrayOf(0.96f, 0.80f, 12.0f, 4.4f)
+        )
+        val ORBS = arrayOf(
+            floatArrayOf(0.22f, 0.20f, 14f, 0.3f, 0.34f), floatArrayOf(0.80f, 0.42f, 17f, 2.4f, 0.28f),
+            floatArrayOf(0.34f, 0.66f, 16f, 4.1f, 0.30f), floatArrayOf(0.86f, 0.86f, 15f, 1.1f, 0.26f)
+        )
     }
 
     override fun onDraw(c: Canvas) {
@@ -82,21 +112,12 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette, private val rich: 
         val t = if (calm) 0f else SystemClock.uptimeMillis() / 1000f
         c.drawColor(FocusTheme.bg(pal.dark))
         if (clouds.isEmpty()) {
-            val radii = if (rich) floatArrayOf(46f, 92f, 38f, 70f, 64f, 84f, 44f, 76f, 58f, 96f) else floatArrayOf(46f, 92f, 38f, 70f)
+            val radii = if (rich) RADII_RICH else RADII_LITE
             for (r in radii) clouds.add(puff(r * d))
         }
         cloud.color = Color.argb(if (pal.dark) 40 else 52, 255, 154, 61)
         // x, y (fraction of the page), drift period, phase
-        val spots = if (rich) arrayOf(
-            floatArrayOf(0.06f, 0.08f, 9.0f, 0f), floatArrayOf(-0.02f, 0.50f, 11.0f, 1.7f),
-            floatArrayOf(0.98f, 0.24f, 8.0f, 3.1f), floatArrayOf(0.96f, 0.78f, 12.0f, 4.4f),
-            floatArrayOf(0.52f, 0.04f, 10.0f, 2.2f), floatArrayOf(0.18f, 0.88f, 13.0f, 0.9f),
-            floatArrayOf(0.74f, 0.52f, 9.5f, 5.0f), floatArrayOf(0.30f, 0.30f, 11.5f, 3.6f),
-            floatArrayOf(0.64f, 0.94f, 10.5f, 1.2f), floatArrayOf(0.02f, 0.70f, 12.5f, 2.8f)
-        ) else arrayOf(
-            floatArrayOf(0.06f, 0.10f, 9.0f, 0f), floatArrayOf(-0.02f, 0.52f, 11.0f, 1.7f),
-            floatArrayOf(0.98f, 0.30f, 8.0f, 3.1f), floatArrayOf(0.96f, 0.80f, 12.0f, 4.4f)
-        )
+        val spots = if (rich) SPOTS_RICH else SPOTS_LITE
         for (i in spots.indices) {
             val sp = spots[i]
             val k = t * 6.2832f / sp[2] + sp[3]
@@ -112,18 +133,15 @@ class AmbientBackdrop(ctx: Context, private val pal: Palette, private val rich: 
         }
         if (rich) {
             // ember orbs: soft orange glows that rise and sway on their own slow loops
-            val orbs = arrayOf(
-                floatArrayOf(0.22f, 0.20f, 14f, 0.3f, 0.34f), floatArrayOf(0.80f, 0.42f, 17f, 2.4f, 0.28f),
-                floatArrayOf(0.34f, 0.66f, 16f, 4.1f, 0.30f), floatArrayOf(0.86f, 0.86f, 15f, 1.1f, 0.26f)
-            )
-            for (o in orbs) {
+            for (i in ORBS.indices) {
+                val o = ORBS[i]
                 val k = t * 6.2832f / o[2] + o[3]
                 val ox = w * o[0] + Math.sin(k.toDouble()).toFloat() * 14f * d
                 val oy = h * o[1] + Math.cos(k * 0.8).toFloat() * 18f * d
-                val rr = w * o[4]
-                orb.shader = RadialGradient(ox, oy, rr,
-                    Color.argb(if (pal.dark) 70 else 62, 255, 122, 43), Color.argb(0, 255, 122, 43), Shader.TileMode.CLAMP)
-                c.drawCircle(ox, oy, rr, orb)
+                c.save()
+                c.translate(ox, oy)
+                c.drawCircle(0f, 0f, w * o[4], orbPaints[i])
+                c.restore()
             }
         }
         m.setTranslate(w * (0.5f + 0.12f * Math.sin(t * 0.22).toFloat()), h * (0.26f + 0.03f * Math.cos(t * 0.19).toFloat()))

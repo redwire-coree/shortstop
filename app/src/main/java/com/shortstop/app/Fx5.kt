@@ -96,6 +96,11 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
     private val face = Paint(Paint.ANTI_ALIAS_FLAG)
     private val faceEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val sweepM = Matrix()
+    private var sweepShader: SweepGradient? = null
+    private var sweepQ = -1; private var sweepTail = 0; private var sweepHead = 0; private var sweepCx = -1f
+    private val sweepColors = IntArray(2)
+    private val sweepPos = floatArrayOf(0f, 1f)
+    private var fitSig = 0; private var fitSize = -1f; private var fitTs = 0f
     private var shadowShader: RadialGradient? = null
     private val shadowP = Paint(Paint.ANTI_ALIAS_FLAG)
     private val shadowM = Matrix()
@@ -162,10 +167,17 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
             val ink = arcBase
             val tail = Color.argb(if (calm) 36 else 58, Color.red(ink), Color.green(ink), Color.blue(ink))
             val headC = Color.argb(if (calm) 110 else 255, Color.red(ink), Color.green(ink), Color.blue(ink))
-            val sg = SweepGradient(cx, cy, intArrayOf(tail, headC), floatArrayOf(0f, maxOf(frac, 0.01f)))
-            sweepM.setRotate(-90f, cx, cy)
-            sg.setLocalMatrix(sweepM)
-            arc.shader = sg
+            // The comet-tail gradient only needs rebuilding when the arc has grown by about a pixel (roughly once a
+            // second), not on every frame; the arc itself is still drawn to the exact fraction below.
+            val q = (frac * 1200f).toInt()
+            if (sweepShader == null || q != sweepQ || tail != sweepTail || headC != sweepHead || cx != sweepCx) {
+                sweepColors[0] = tail; sweepColors[1] = headC; sweepPos[1] = maxOf(frac, 0.01f)
+                val sg = SweepGradient(cx, cy, sweepColors, sweepPos)
+                sweepM.setRotate(-90f, cx, cy)
+                sg.setLocalMatrix(sweepM)
+                sweepShader = sg; sweepQ = q; sweepTail = tail; sweepHead = headC; sweepCx = cx
+            }
+            arc.shader = sweepShader
             c.drawArc(rect, -90f, 360f * frac, false, arc)
             arc.shader = null
         }
@@ -217,13 +229,24 @@ class TimerDial(ctx: Context, private val pal: Palette, private val fonts: Fonts
         // digits, sized to sit inside the dots
         // one size for the whole session: fitted against the widest digits of the same length, so nothing
         // changes size as the numbers tick and nothing can leave the circle
-        var ts = size * (if (goalMode) 0.2f else 0.205f)
-        val inner = (if (goalMode) faceR * 2f * 0.8f else dr * 2f - 28f * d)
-        val template = big.map { if (it.isDigit()) '8' else it }.joinToString("")
-        bigP.textSize = ts
-        while (bigP.measureText(template) > inner && ts > 18f * d) {
-            ts -= 0.5f * d
+        // The fitted size only changes when the text's shape (its length and punctuation) or the dial size does,
+        // so the search runs then and not on every frame.
+        var sig = if (goalMode) 17 else 5
+        for (ch in big) sig = sig * 31 + (if (ch.isDigit()) 1 else ch.code)
+        var ts: Float
+        if (sig == fitSig && size == fitSize) {
+            ts = fitTs
             bigP.textSize = ts
+        } else {
+            ts = size * (if (goalMode) 0.2f else 0.205f)
+            val inner = (if (goalMode) faceR * 2f * 0.8f else dr * 2f - 28f * d)
+            val template = big.map { if (it.isDigit()) '8' else it }.joinToString("")
+            bigP.textSize = ts
+            while (bigP.measureText(template) > inner && ts > 18f * d) {
+                ts -= 0.5f * d
+                bigP.textSize = ts
+            }
+            fitSig = sig; fitSize = size; fitTs = ts
         }
         val base = cy + ts * 0.2f
         if (goalMode) drawBrand(c, cx, cy, r, base, ts, now)

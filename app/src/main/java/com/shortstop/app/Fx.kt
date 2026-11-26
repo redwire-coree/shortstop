@@ -48,6 +48,7 @@ class RollPainter(private val host: View) {
     // Short and restrained: a long roll with both digits half-visible at once is what read as ghosting on a 1 s countdown.
     private val dur = 300L
     private var active = false
+    private val widths = FloatArray(24)
 
     fun set(text: String, animate: Boolean) {
         val old = cur
@@ -81,7 +82,7 @@ class RollPainter(private val host: View) {
     fun draw(c: Canvas, paint: Paint, cx: Float, baseline: Float) {
         val n = cur.length.coerceAtMost(24)
         val digitW = paint.measureText("0")
-        val widths = FloatArray(n)
+        val widths = this.widths
         var total = 0f
         for (i in 0 until n) {
             val ch = cur[cur.length - n + i]

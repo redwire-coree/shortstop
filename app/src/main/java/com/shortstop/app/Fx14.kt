@@ -145,6 +145,9 @@ class TagPicker(
     private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = fonts.semi; textAlign = Paint.Align.CENTER; textSize = 14f * d }
     private val r = RectF()
     private val clip = Path()
+    private var fillShader: LinearGradient? = null
+    private var hiShader: LinearGradient? = null
+    private var fillH = -1f
     private var cell = 0f
     private val easeIn = android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f)
     private val easeOut = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
@@ -200,7 +203,15 @@ class TagPicker(
         c.drawRoundRect(r, h / 2f, h / 2f, paint)
 
         val ih = h - pad * 2f
-        val strong = if (dark) Color.parseColor("#F4F4F5") else Color.parseColor("#18181B")
+        val strong = if (dark) 0xFFF4F4F5.toInt() else 0xFF18181B.toInt()
+        // the vertical gradients are the same for every tab, so they are built once per height, not per tab per frame
+        if (fillShader == null || fillH != ih) {
+            fillShader = LinearGradient(0f, pad, 0f, pad + ih,
+                if (dark) 0xFF3A3644.toInt() else Color.WHITE,
+                if (dark) 0xFF27242F.toInt() else 0xFFF6F6F8.toInt(), Shader.TileMode.CLAMP)
+            hiShader = LinearGradient(0f, pad, 0f, pad + ih, HI, LO, Shader.TileMode.CLAMP)
+            fillH = ih
+        }
         val roll = ih / 2f + 0.7f * txt.textSize
         val reach = Math.sqrt(((cell / 2f) * (cell / 2f) + ih * ih).toDouble()).toFloat() + 2f * d
         val ty0 = pad + ih / 2f - (txt.ascent() + txt.descent()) / 2f
@@ -208,9 +219,7 @@ class TagPicker(
             val l = t0(i); val rgt = l + cell
             r.set(l, pad, rgt, pad + ih)
             paint.style = Paint.Style.FILL
-            paint.shader = LinearGradient(0f, r.top, 0f, r.bottom,
-                if (dark) Color.parseColor("#3A3644") else Color.WHITE,
-                if (dark) Color.parseColor("#27242F") else Color.parseColor("#F6F6F8"), Shader.TileMode.CLAMP)
+            paint.shader = fillShader
             c.drawRoundRect(r, ih / 2f, ih / 2f, paint)
             paint.shader = null
             c.save()
@@ -218,7 +227,7 @@ class TagPicker(
             c.clipPath(clip)
             val fi = f[i]
             if (fi > 0.001f) {
-                paint.shader = LinearGradient(0f, r.top, 0f, r.bottom, HI, LO, Shader.TileMode.CLAMP)
+                paint.shader = hiShader
                 paint.alpha = 255
                 c.drawCircle((l + rgt) / 2f, r.bottom, reach * fi, paint)
                 paint.shader = null
