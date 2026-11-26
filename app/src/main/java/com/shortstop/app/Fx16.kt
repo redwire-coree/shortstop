@@ -12,14 +12,14 @@ import android.provider.Settings
 
 /** Colours and helpers for the warm Focus look (cream in light mode, espresso in dark). Used on the Focus page only. */
 object FocusTheme {
-    fun bg(dark: Boolean): Int = Color.parseColor(if (dark) "#2A1A10" else "#FFF3E3")
-    fun title(dark: Boolean): Int = Color.parseColor(if (dark) "#FFEFD9" else "#4A2A12")
-    fun cardFill(dark: Boolean): Int = Color.parseColor(if (dark) "#3A2517" else "#FFFBF6")
-    fun cardEdge(dark: Boolean): Int = Color.parseColor(if (dark) "#4D3322" else "#F6E2C8")
-    fun muted(dark: Boolean): Int = Color.parseColor(if (dark) "#D0BBA7" else "#8A725F")
-    fun accent(dark: Boolean): Int = Color.parseColor(if (dark) "#FFAD61" else "#E97825")
-    fun accentSoft(dark: Boolean): Int = Color.parseColor(if (dark) "#55351F" else "#FFF0E0")
-    fun track(dark: Boolean): Int = Color.parseColor(if (dark) "#60432E" else "#F5DFC7")
+    fun bg(dark: Boolean): Int = if (dark) 0xFF2A1A10.toInt() else 0xFFFFF3E3.toInt()
+    fun title(dark: Boolean): Int = if (dark) 0xFFFFEFD9.toInt() else 0xFF4A2A12.toInt()
+    fun cardFill(dark: Boolean): Int = if (dark) 0xFF3A2517.toInt() else 0xFFFFFBF6.toInt()
+    fun cardEdge(dark: Boolean): Int = if (dark) 0xFF4D3322.toInt() else 0xFFF6E2C8.toInt()
+    fun muted(dark: Boolean): Int = if (dark) 0xFFD0BBA7.toInt() else 0xFF8A725F.toInt()
+    fun accent(dark: Boolean): Int = if (dark) 0xFFFFAD61.toInt() else 0xFFE97825.toInt()
+    fun accentSoft(dark: Boolean): Int = if (dark) 0xFF55351F.toInt() else 0xFFFFF0E0.toInt()
+    fun track(dark: Boolean): Int = if (dark) 0xFF60432E.toInt() else 0xFFF5DFC7.toInt()
     val orange: Int = Color.parseColor("#FF9A3D")
 
     fun reducedMotion(c: Context): Boolean =

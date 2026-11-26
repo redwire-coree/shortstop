@@ -53,11 +53,11 @@ class SheetBackdrop(ctx: Context, private val targets: List<View>, private val t
 
     private fun applyBlur() {
         if (!live) return
-        val r = level * 16f * d
-        if (kotlin.math.abs(r - lastR) < 0.3f && !(r == 0f && lastR != 0f)) return
+        val r = level * 14f * d
+        if (kotlin.math.abs(r - lastR) < 0.6f && !(r == 0f && lastR != 0f)) return
         lastR = r
         val fx = if (r < 0.5f) null else RenderEffect.createBlurEffect(r, r, Shader.TileMode.CLAMP)
-        for (t in targets) t.setRenderEffect(fx)
+        for (t in targets) if (t.visibility == VISIBLE && t.width > 0) t.setRenderEffect(fx)
     }
 
     override fun onDraw(c: Canvas) {

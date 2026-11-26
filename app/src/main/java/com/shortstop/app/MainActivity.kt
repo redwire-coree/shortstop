@@ -927,11 +927,13 @@ class MainActivity : Activity() {
         val dir = if (i > tabBefore) 1f else -1f
         nw.alpha = 0f
         nw.translationX = dir * dp(36)
-        nw.animate().alpha(1f).translationX(0f).setDuration(520).setInterpolator(SpringInterpolator(15f, 0.75f, 0.9f)).withLayer().start()
+        // no hardware layer here: the rows inside are animating too (stagger), and a layer would be re-rendered every frame
+        nw.animate().alpha(1f).translationX(0f).setDuration(420).setInterpolator(SpringInterpolator(15f, 0.82f, 0.9f)).start()
         stagger(nw)
         styleNav()
         updateStatusBar()
-        if (i == 0) window.decorView.postDelayed({ maybeNudge() }, 6000L) else dismissNudge()
+        window.decorView.removeCallbacks(nudgeRun)
+        if (i == 0) window.decorView.postDelayed(nudgeRun, 6000L) else dismissNudge()
     }
 
     private val stagAnims = ArrayList<ValueAnimator>()
@@ -945,8 +947,8 @@ class MainActivity : Activity() {
         v.translationY = dp(26).toFloat()
         val a = ValueAnimator.ofFloat(0f, 1f)
         a.startDelay = delay
-        a.duration = 900
-        a.interpolator = SpringInterpolator(15f, 0.6f, 0.9f)
+        a.duration = 700
+        a.interpolator = SpringInterpolator(15f, 0.8f, 0.9f)
         a.addUpdateListener {
             val f = it.animatedValue as Float
             v.alpha = (f * 2.4f).coerceIn(0f, 1f)
