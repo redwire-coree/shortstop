@@ -103,6 +103,6 @@ alive || fail "app died after lock/unlock"
 note "8. crash scan"
 adb logcat -d > "$OUT/logcat.txt"
 if grep -q "FATAL EXCEPTION" "$OUT/logcat.txt"; then fail "FATAL EXCEPTION in logcat"; grep -A12 "FATAL EXCEPTION" "$OUT/logcat.txt" | head -40; fi
-grep -i "ANR in\|am_anr" "$OUT/logcat.txt" | head -3 && fail "ANR seen"
+if grep -qiE "ANR in|am_anr" "$OUT/logcat.txt"; then grep -iE "ANR in|am_anr" "$OUT/logcat.txt" | head -3; fail "ANR seen"; fi
 echo "failures: $FAILS"
 exit $FAILS
