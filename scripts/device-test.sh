@@ -38,9 +38,23 @@ seed() {
   adb shell "run-as $PKG sh -c 'mkdir -p shared_prefs && cp /data/local/tmp/shortstop.xml shared_prefs/shortstop.xml'"
 }
 prefs() { adb shell "run-as $PKG cat shared_prefs/shortstop.xml" 2>/dev/null; }
-pref() { prefs | grep "name=\"$1\"" | sed -E 's/.*(value="|>)([^"<]*).*/\2/' | head -1; }
+pref() { # value of one saved setting ("" when missing)
+  local line; line=$(prefs | grep "name=\"$1\"" | head -1)
+  case "$line" in
+    *'value="'*) echo "$line" | sed -E 's/.*value="([^"]*)".*/\1/';;
+    *'>'*'</'*) echo "$line" | sed -E 's/^[^>]*>([^<]*)<.*/\1/';;
+  esac
+}
 # UI detection from the accessibility tree (no guessed coordinates)
-dump() { adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb exec-out cat /sdcard/ui.xml > "$OUT/ui.xml"; }
+dump() { # fresh dump every time (a failed dump must never leave an old file to be read); a few retries for busy screens
+  adb shell rm -f /sdcard/ui.xml
+  local n; for n in 1 2 3 4 5; do
+    adb shell uiautomator dump /sdcard/ui.xml 2>&1 | grep -q "dumped" && break
+    [ $n = 5 ] && echo "DUMPFAIL"
+    sleep 1
+  done
+  adb exec-out cat /sdcard/ui.xml > "$OUT/ui.xml" 2>/dev/null
+}
 has() { dump; python3 "$HERE/ui.py" find "$OUT/ui.xml" "$1" >/dev/null; }
 taptext() { dump; local xy; xy=$(python3 "$HERE/ui.py" find "$OUT/ui.xml" "$1") || return 1; adb shell input tap $xy; }
 texts() { dump; python3 "$HERE/ui.py" texts "$OUT/ui.xml" | head -${1:-25}; }
@@ -109,6 +123,11 @@ adb shell input keyevent KEYCODE_POWER; sleep 1.5; adb shell input keyevent KEYC
 shot 03_after_lock
 alive; check "screen lock/unlock" $?
 
+# From here the accessibility service is switched on, like a phone that finished setup (the setup card is then gone).
+adb shell settings put secure enabled_accessibility_services $PKG/$PKG.ShortsBlockerService
+adb shell settings put secure accessibility_enabled 1
+sleep 3
+
 # ---------------------------------------------------------------- 4. Normal Focus running, persistence, recovery
 echo "== 4 normal focus"
 running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml
@@ -117,10 +136,10 @@ start 3; shot 04_normal_running
 has "End session"; check "normal focus: End session button detected" $?
 nonblank 04_normal_running; check "normal focus: not blank" $?
 sleep 20
-[ "$(pref f_end)" = "$F_END" ] && [ "$(pref f_start)" = "$F_START" ]; check "timer state: start/end unchanged after 20 s (no reset or drift)" $?
+[ -n "$F_END" ] && [ "$(pref f_end)" = "$F_END" ] && [ "$(pref f_start)" = "$F_START" ]; check "timer state: start/end unchanged after 20 s (no reset or drift)" $?
 adb shell am force-stop $PKG; start 3; shot 04_normal_recovered
 has "End session"; check "session recovery after process kill" $?
-[ "$(pref f_end)" = "$F_END" ]; check "session recovery: end time preserved" $?
+[ -n "$F_END" ] && [ "$(pref f_end)" = "$F_END" ]; check "session recovery: end time preserved" $?
 
 # ---------------------------------------------------------------- 5. break
 echo "== 5 break"
