@@ -1,6 +1,10 @@
 name: Device test (emulator)
 on:
   workflow_dispatch:
+  # runs only when this workflow or the script changes (workflow_dispatch needs the file on the default branch, which stays untouched)
+  push:
+    branches: [orange-rig]
+    paths: ['scripts/device-test.sh', '.github/workflows/device-test.yml']
 jobs:
   device:
     runs-on: ubuntu-latest
