@@ -2318,7 +2318,7 @@ class MainActivity : Activity() {
         c.addRow(toggleRow("Uninstall protection", "Stays on through breaks until the focus cycle ends", Store.uninstallGuard(this),
             veto = { turnOn ->
                 // a break is part of the same focus cycle, so protection cannot be switched off until it is completely over
-                if (!turnOn && Store.uninstallGuard(this) && Store.cycleActive(this)) {
+                if (!turnOn && Store.uninstallGuard(this) && Store.guardLocked(this)) {
                     toast("Uninstall protection stays on", "It stays active through breaks until your whole focus cycle ends.")
                     false
                 } else true

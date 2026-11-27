@@ -343,9 +343,17 @@ object Store {
      */
     fun cycleActive(c: Context): Boolean = focusRunning(c) || scheduleActive(c) != null
 
-    /** Switching protection off is refused for the whole cycle. Returns whether the stored value now equals [v]. */
+    /**
+     * The switch is locked ON for the whole cycle (breaks and pauses included) when it was ON as the session began,
+     * for Normal Focus and Ultra Focus alike. A protection that was OFF at the start is never switched on for the user.
+     * An active focus schedule keeps it locked too.
+     */
+    fun guardLocked(c: Context): Boolean =
+        (focusRunning(c) && p(c).getBoolean("f_guard", false)) || scheduleActive(c) != null
+
+    /** Switching protection off is refused while it is locked. Returns whether the stored value now equals [v]. */
     fun setUninstallGuard(c: Context, v: Boolean): Boolean {
-        if (!v && uninstallGuard(c) && cycleActive(c)) return false
+        if (!v && uninstallGuard(c) && guardLocked(c)) return false
         p(c).edit().putBoolean("u_guard", v).apply()
         return true
     }
@@ -403,6 +411,8 @@ object Store {
             .putInt("f_bleft", breaks).putInt("f_blen", breakMin)
             .putLong("f_bu", 0L).putLong("f_bs", 0L).putLong("f_bt", 0L)
             .putLong("lock_until", if (strict) end else 0L)
+            // what the protection switch said when the session began: only a protection that was ON at the start is locked
+            .putBoolean("f_guard", uninstallGuard(c))
             .apply()
         rememberSession(c, minutes, tag, breaks, breakMin)
     }
