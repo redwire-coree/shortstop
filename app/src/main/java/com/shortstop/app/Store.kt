@@ -344,17 +344,22 @@ object Store {
     fun cycleActive(c: Context): Boolean = focusRunning(c) || scheduleActive(c) != null
 
     /**
-     * The switch is locked ON for the whole cycle (breaks and pauses included) when it was ON as the session began,
-     * for Normal Focus and Ultra Focus alike. A protection that was OFF at the start is never switched on for the user.
-     * An active focus schedule keeps it locked too.
+     * Three separate things: the saved preference ("u_guard", what the user chose), whether the service is really
+     * working (checked where it is shown), and this session lock ("g_lock"). The lock is taken when a session starts
+     * with protection ON, or the moment the user switches protection ON during a running session, and is held for the
+     * whole cycle: breaks, pauses, resumes, navigation, backgrounding and recreation never release it, because it is
+     * stored, not derived from the timer. It is released only when the cycle ends. Protection that was OFF at the
+     * start is never switched on for the user. An active focus schedule keeps it locked as before.
      */
     fun guardLocked(c: Context): Boolean =
-        (focusRunning(c) && p(c).getBoolean("f_guard", false)) || scheduleActive(c) != null
+        (focusRunning(c) && p(c).getBoolean("g_lock", false)) || scheduleActive(c) != null
 
     /** Switching protection off is refused while it is locked. Returns whether the stored value now equals [v]. */
     fun setUninstallGuard(c: Context, v: Boolean): Boolean {
         if (!v && uninstallGuard(c) && guardLocked(c)) return false
-        p(c).edit().putBoolean("u_guard", v).apply()
+        val e = p(c).edit().putBoolean("u_guard", v)
+        if (v && focusRunning(c)) e.putBoolean("g_lock", true)   // switched on mid-session: locked for the rest of the cycle
+        e.apply()
         return true
     }
     fun blockNotifs(c: Context) = p(c).getBoolean("u_notif", false)
@@ -411,8 +416,8 @@ object Store {
             .putInt("f_bleft", breaks).putInt("f_blen", breakMin)
             .putLong("f_bu", 0L).putLong("f_bs", 0L).putLong("f_bt", 0L)
             .putLong("lock_until", if (strict) end else 0L)
-            // what the protection switch said when the session began: only a protection that was ON at the start is locked
-            .putBoolean("f_guard", uninstallGuard(c))
+            // the session lock is taken now if protection is already on; it is released when the cycle ends
+            .putBoolean("g_lock", uninstallGuard(c))
             .apply()
         rememberSession(c, minutes, tag, breaks, breakMin)
     }
@@ -477,7 +482,8 @@ object Store {
     }
 
     private fun clearFocus(c: Context) {
-        p(c).edit().putLong("f_end", 0L).putLong("f_start", 0L).putLong("f_bu", 0L).putLong("f_bs", 0L).putLong("lock_until", 0L).apply()
+        p(c).edit().putLong("f_end", 0L).putLong("f_start", 0L).putLong("f_bu", 0L).putLong("f_bs", 0L).putLong("lock_until", 0L)
+            .putBoolean("g_lock", false).apply()
     }
 
     private fun recordSession(c: Context, completed: Boolean) {
