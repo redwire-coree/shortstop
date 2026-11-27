@@ -10,7 +10,13 @@ mkdir -p "$OUT"
 FAILS=0
 note() { echo "== $*"; }
 fail() { echo "FAIL: $*"; FAILS=$((FAILS+1)); }
-shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
+shot() {
+  adb exec-out screencap -p > "$OUT/$1.png"
+  # the sandbox cannot download CI artifacts, so each screenshot is also printed into the job log as a small JPEG (base64)
+  if command -v convert >/dev/null && [ -s "$OUT/$1.png" ]; then
+    echo "SHOT-BEGIN $1"; convert "$OUT/$1.png" -resize 300x -quality 55 jpg:- | base64 -w0; echo; echo "SHOT-END $1"
+  fi
+}
 alive() { [ -n "$(adb shell pidof $PKG | tr -d '\r')" ]; }
 crashed() { adb logcat -d -b crash 2>/dev/null | grep -q "$PKG" || adb logcat -d 2>/dev/null | grep -q "FATAL EXCEPTION"; }
 start() { adb shell am start -W -n $PKG/.MainActivity >/dev/null; sleep "${1:-2}"; }
