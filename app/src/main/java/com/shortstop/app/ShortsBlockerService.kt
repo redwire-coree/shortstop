@@ -65,6 +65,14 @@ class ShortsBlockerService : AccessibilityService() {
         return hardVal
     }
 
+    private var cycleAt = 0L
+    private var cycleVal = false
+    /** Focus cycle in progress (session, break or schedule). Cached for a few seconds like [hard]. */
+    private fun cycleNow(now: Long): Boolean {
+        if (now - cycleAt > 3000) { cycleVal = Store.cycleActive(this); cycleAt = now }
+        return cycleVal
+    }
+
     private val launcherPkg: String? by lazy {
         try {
             val i = android.content.Intent(android.content.Intent.ACTION_MAIN)
@@ -118,12 +126,13 @@ class ShortsBlockerService : AccessibilityService() {
         val hardNow = hard()
 
         // 1b. Uninstall protection: keep Settings away from Shortstop while focus is on
-        if (hardNow && Store.uninstallGuard(this) && pkg in SETTINGS_PKGS && now - lastBlock > 700) {
+        // Protection follows the whole focus cycle (breaks included), not the blocking state: a break must not open a way to uninstall.
+        if (Store.uninstallGuard(this) && pkg in SETTINGS_PKGS && cycleNow(now) && now - lastBlock > 700) {
             val root = rootInActiveWindow
             if (root != null && mentionsUs(root)) {
                 lastBlock = now
                 performGlobalAction(GLOBAL_ACTION_HOME)
-                Toast.makeText(this, "Uninstall protection is on during focus", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Uninstall protection stays on until your focus cycle ends", Toast.LENGTH_SHORT).show()
                 return
             }
         }

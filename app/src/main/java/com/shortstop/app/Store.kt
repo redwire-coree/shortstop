@@ -335,7 +335,20 @@ object Store {
     fun studyMode(c: Context) = p(c).getBoolean("u_study", false)
     fun setStudyMode(c: Context, v: Boolean) = p(c).edit().putBoolean("u_study", v).apply()
     fun uninstallGuard(c: Context) = p(c).getBoolean("u_guard", false)
-    fun setUninstallGuard(c: Context, v: Boolean) = p(c).edit().putBoolean("u_guard", v).apply()
+
+    /**
+     * The whole focus cycle is one protected span: the session running, any break inside it (a break only extends the
+     * session's end time) and an active focus schedule. Unlike [hard], this does NOT drop out while a break is on,
+     * because a break is not permission to uninstall.
+     */
+    fun cycleActive(c: Context): Boolean = focusRunning(c) || scheduleActive(c) != null
+
+    /** Switching protection off is refused for the whole cycle. Returns whether the stored value now equals [v]. */
+    fun setUninstallGuard(c: Context, v: Boolean): Boolean {
+        if (!v && uninstallGuard(c) && cycleActive(c)) return false
+        p(c).edit().putBoolean("u_guard", v).apply()
+        return true
+    }
     fun blockNotifs(c: Context) = p(c).getBoolean("u_notif", false)
     fun setBlockNotifs(c: Context, v: Boolean) = p(c).edit().putBoolean("u_notif", v).apply()
     fun blockHome(c: Context) = p(c).getBoolean("u_home", false)

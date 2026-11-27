@@ -611,6 +611,8 @@ class MainActivity : Activity() {
         var on = false
             private set
         var listener: ((Boolean) -> Unit)? = null
+        /** Asked before a tap changes anything; returning false leaves the switch exactly as it was. */
+        var veto: ((Boolean) -> Boolean)? = null
         var brand = false
         private var p = 0f
         private var brandW = 0f
@@ -626,6 +628,7 @@ class MainActivity : Activity() {
             isFocusable = true
             setOnClickListener {
                 if (!free()) return@setOnClickListener
+                if (veto?.invoke(!on) == false) return@setOnClickListener
                 setOn(!on, true)
                 performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                 listener?.invoke(on)
@@ -751,7 +754,7 @@ class MainActivity : Activity() {
     }
 
     // ---------- reusable rows ----------
-    private fun toggleRow(title: String, sub: String, checked: Boolean, onChange: (Boolean) -> Unit): View {
+    private fun toggleRow(title: String, sub: String, checked: Boolean, veto: ((Boolean) -> Boolean)? = null, onChange: (Boolean) -> Unit): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -763,6 +766,7 @@ class MainActivity : Activity() {
         row.addView(col, lp(0, wrapC, 1f).apply { marginEnd = dp(12) })
         val t = ToggleView(this)
         t.setOn(checked, false)
+        t.veto = veto
         t.listener = onChange
         row.addView(t)
         row.setOnClickListener { t.performClick() }
@@ -1739,8 +1743,16 @@ class MainActivity : Activity() {
                         c.play(Move.SLEEP, 1f, true)
                         c.say("Taking a little rest.", 0L, LineCat.SLEEP)
                     } else {
-                        c.play(Move.ENTER, 1f, true)
-                        c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this) && !endArmed) c.play(Move.FOCUS, 1f, true) }, 1500L)
+                        // The encouraging nod plays once per session start. Coming back to a session that is already
+                        // running (Activity recreated, app reopened) goes straight to the calm focus pose instead.
+                        val st = Store.focusStart(this)
+                        val p = Store.prefs(this)
+                        if (p.getLong("reacted_start", 0L) != st) {
+                            p.edit().putLong("reacted_start", st).apply()
+                            c.play(Move.ENCOURAGE, 1f, true)
+                            c.say("Let's focus.", 1800L, LineCat.FOCUS)
+                            c.postDelayed({ if (Store.focusRunning(this) && !Store.onBreak(this) && !endArmed) c.play(Move.FOCUS, 1f, true) }, 1500L)
+                        } else c.play(Move.FOCUS, 1f, true)
                     }
                 } else if (calmBreak == null) {
                     calmBreak = onBreak
@@ -1768,6 +1780,10 @@ class MainActivity : Activity() {
     private fun onSessionDone() {
         fillFocusStats()
         val last = Store.sessions(this).lastOrNull() ?: return
+        // One reaction per finished session, remembered across screen refreshes, returning from the background and
+        // Activity recreation (the in-memory wasRunning flag alone cannot know that this ending was already celebrated).
+        if (Store.prefs(this).getLong("reacted_end", 0L) == last.start) return
+        Store.prefs(this).edit().putLong("reacted_end", last.start).apply()
         val goalNow = Store.goalMin(this)
         val todayNow = Store.focusMinutesAgo(this, 0)
         val goalHit = last.done && goalNow > 0 && todayNow >= goalNow && todayNow - last.minutes < goalNow
@@ -1776,14 +1792,12 @@ class MainActivity : Activity() {
         if (c != null && tab == 0) {
             refreshCompanion()
             if (goalHit) Store.prefs(this).edit().putString("proud_day", java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())).apply()
-            val reaction = when {
-                last.done -> Move.VICTORY
-                last.minutes < 5 -> Move.CRYING
-                last.minutes >= 45 -> Move.FINAL_BOSS
-                else -> Move.BEGGING
-            }
+            // A finished session gets the Victory performance. A session ended early gets the small gentle OOPS, never a
+            // sad, begging or angry one: stopping early is not something to be shamed for. Crying, Rage and Overload
+            // stay in the showcase, because no real event calls for them.
+            val reaction = if (last.done) Move.VICTORY else Move.OOPS
             companionMessage(msg); c.play(reaction, 1f, true)
-            c.postDelayed({ if (c.isAttachedToWindow) c.play(Move.IDLE, 1f, true) }, 4200L)
+            c.postDelayed({ if (c.isAttachedToWindow && !Store.focusRunning(this)) c.play(Move.IDLE, 1f, true) }, 4300L)
             scheduleSleep()
         } else orangeSay(if (last.done) Move.CELEBRATE else Move.OOPS, msg, true, 1700L, 170)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(4)) }
@@ -2248,7 +2262,14 @@ class MainActivity : Activity() {
         val c = card()
         c.addRow(toggleRow("Ultra Focus", "No quitting until it ends", Store.strictDefault(this)) { Store.setStrictDefault(this, it) })
         c.addRow(toggleRow("YouTube Study Mode", "Only Shorts and the feed are blocked", Store.studyMode(this)) { Store.setStudyMode(this, it) })
-        c.addRow(toggleRow("Uninstall protection", "Blocks removal during focus", Store.uninstallGuard(this)) { Store.setUninstallGuard(this, it) })
+        c.addRow(toggleRow("Uninstall protection", "Stays on through breaks until the focus cycle ends", Store.uninstallGuard(this),
+            veto = { turnOn ->
+                // a break is part of the same focus cycle, so protection cannot be switched off until it is completely over
+                if (!turnOn && Store.uninstallGuard(this) && Store.cycleActive(this)) {
+                    toast("Uninstall protection stays on", "It stays active through breaks until your whole focus cycle ends.")
+                    false
+                } else true
+            }) { Store.setUninstallGuard(this, it) })
         c.addRow(toggleRow("Block notifications", "Hides alerts from blocked apps", Store.blockNotifs(this)) {
             Store.setBlockNotifs(this, it)
             if (it && !notifAccess()) {
@@ -2260,6 +2281,8 @@ class MainActivity : Activity() {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         box.addView(c, lp(matchP, wrapC))
         box.addView(note("Uninstall protection makes removal harder, but it can't stop Android's own safe mode."))
+        if (Store.uninstallGuard(this) && !(serviceOn() && ShortsBlockerService.alive))
+            box.addView(note("Protection is not working right now: switch Shortstop's Accessibility service on in Settings."))
         showSheet("Ultra Focus settings", box, onClose)
     }
 
