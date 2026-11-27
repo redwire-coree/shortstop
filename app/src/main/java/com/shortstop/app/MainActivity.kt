@@ -1376,7 +1376,7 @@ class MainActivity : Activity() {
         val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val breakBtn = pill("Take a break", false) { onBreakClick() }
         val endBtn = FuseButton(this, pal, fonts, "End session", "Undo", "Ended", 4000L,
-            { if (Store.frozen(this)) { free(); false } else true }) {
+            { if (Store.frozen(this)) { free(); onUltraEndAttempt(); false } else true }) {
             commitEndSession()
         }
         endBtn.onArm = { onEndArmed() }
@@ -1624,6 +1624,53 @@ class MainActivity : Activity() {
     private var deadToken = 0
     private var deadPlaying = false
 
+    // ----- Ultra Focus reactions (Rage on a refused End-session tap, Overload on repeated blocked launches) -----
+    private var ultraToken = 0
+    private var rageUntil = 0L
+    private var overloadUntil = 0L
+
+    /** Back to the calm pose the session is really in, unless a newer reaction (or Dead) has taken over. */
+    private fun settleCalm(token: Int) {
+        val o = calmOrange ?: return
+        if (token != ultraToken || !o.isAttachedToWindow || !Store.focusRunning(this) || endArmed || deadPlaying) return
+        o.play(if (Store.onBreak(this)) Move.SLEEP else Move.FOCUS, 1f, true)
+    }
+
+    /** Ultra Focus does not allow ending early, so the tap is refused. Orange reacts once per burst of taps. */
+    private fun onUltraEndAttempt() {
+        val o = calmOrange ?: return
+        if (!Store.focusStrict(this) || !Store.focusRunning(this) || Store.onBreak(this) || endArmed || deadPlaying) return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now < rageUntil) return
+        rageUntil = now + 4300L
+        val token = ++ultraToken   // outranks a running Overload: its settle callback becomes stale
+        o.removeCallbacks(breakSleepRun)
+        o.say("Don't give up yet!", 2400L, LineCat.PLAYFUL)
+        o.play(Move.FINAL_BOSS, 1f, true)
+        o.postDelayed({ settleCalm(token) }, 4300L)
+    }
+
+    /** The blocker noted a third blocked-app launch within 60 s in this Ultra Focus session: play Overload once, when seen. */
+    private fun checkOverload() {
+        val p = Store.prefs(this)
+        val at = p.getLong("ovl_at", 0L)
+        if (at == 0L) return
+        val stale = System.currentTimeMillis() - at > 180_000L || !Store.focusRunning(this) || !Store.focusStrict(this) ||
+            p.getLong("ovl_done", 0L) != Store.focusStart(this)   // a leftover from an earlier session
+        if (stale) { p.edit().putLong("ovl_at", 0L).apply(); return }
+        val o = calmOrange ?: return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (o.visibility != View.VISIBLE || !o.isAttachedToWindow || tab != 0 || sheetLayer != null || tourView != null ||
+            endArmed || deadPlaying || Store.onBreak(this) || now < rageUntil || now < overloadUntil) return
+        p.edit().putLong("ovl_at", 0L).apply()
+        overloadUntil = now + 4300L
+        val token = ++ultraToken
+        o.removeCallbacks(breakSleepRun)
+        o.say("Still blocked. Stay with it.", 2400L, LineCat.PLAYFUL)
+        o.play(Move.OVERLOAD, 1f, true)
+        o.postDelayed({ settleCalm(token) }, 4300L)
+    }
+
     /** Stage 1, the instant End session is pressed (and allowed): Orange begs while the Undo window runs. */
     private fun onEndArmed() {
         endArmed = true
@@ -1646,6 +1693,7 @@ class MainActivity : Activity() {
     /** Stage 2: runs only when the existing end logic has really ended the session. */
     private fun commitEndSession() {
         endArmed = false
+        ultraToken++   // Dead outranks everything: a pending Rage/Overload settle must never restart over it
         val ended = Store.endFocusEarly(this)
         wasRunning = false
         updateRunning()
@@ -1763,6 +1811,7 @@ class MainActivity : Activity() {
                     Unit
                 }
             }
+            checkOverload()
             runLabel?.text = if (onBreak) "On break" else "Focusing"
             runElapsed?.text = clock(now - start)
         } else {
@@ -1789,6 +1838,7 @@ class MainActivity : Activity() {
         val goalHit = last.done && goalNow > 0 && todayNow >= goalNow && todayNow - last.minutes < goalNow
         val msg = if (goalHit) "Daily goal done!" else if (last.done) "Nice focus!" else "Next one counts."
         val c = companionOrange
+        val fullSize = c != null && tab == 0
         if (c != null && tab == 0) {
             refreshCompanion()
             if (goalHit) Store.prefs(this).edit().putString("proud_day", java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())).apply()
@@ -1841,7 +1891,10 @@ class MainActivity : Activity() {
         btns.addView(pill("Share", true) { shareFocusCard(this, card, shareText) }, lp(0, wrapC, 1f).apply { rightMargin = dp(10) })
         btns.addView(pill("Done", false) { closeSheet() }, lp(0, wrapC, 1f))
         box.addView(btns, lp(matchP, wrapC))
-        showSheet("Session complete", box)
+        // Victory first, then the summary once the celebration has finished (full-size Orange 4.2 s, small one about 2.6 s).
+        // A session that did not complete has no celebration, so its summary shows straight away.
+        val showSummary = Runnable { if (!isFinishing && !isDestroyed) showSheet("Session complete", box) }
+        if (last.done) ui.postDelayed(showSummary, if (fullSize) 4300L else 2600L) else showSummary.run()
     }
 
     // ----- Day / Week / Month -----

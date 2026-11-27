@@ -65,6 +65,27 @@ class ShortsBlockerService : AccessibilityService() {
         return hardVal
     }
 
+    // Ultra Focus: the third blocked-app launch within 60 s tells Shortstop's Orange to react, once per session.
+    private val launchTimes = ArrayDeque<Long>()
+    private var launchesFor = 0L
+    private var lastLaunchAt = 0L
+
+    private fun noteBlockedLaunch() {
+        if (!Store.focusRunning(this) || !Store.focusStrict(this) || Store.onBreak(this)) return
+        val t = SystemClock.elapsedRealtime()
+        val start = Store.focusStart(this)
+        if (start != launchesFor) { launchesFor = start; launchTimes.clear() }
+        if (t - lastLaunchAt < 1500L) return   // the several events of one launch count as one attempt
+        lastLaunchAt = t
+        launchTimes.addLast(t)
+        while (launchTimes.isNotEmpty() && t - launchTimes.first() > 60_000L) launchTimes.removeFirst()
+        if (launchTimes.size >= 3) {
+            launchTimes.clear()
+            val p = Store.prefs(this)
+            if (p.getLong("ovl_done", 0L) != start) p.edit().putLong("ovl_done", start).putLong("ovl_at", System.currentTimeMillis()).apply()
+        }
+    }
+
     private var cycleAt = 0L
     private var cycleVal = false
     /** Focus cycle in progress (session, break or schedule). Cached for a few seconds like [hard]. */
@@ -158,6 +179,7 @@ class ShortsBlockerService : AccessibilityService() {
         if (Store.isAppBlocked(this, pkg) || inFocus) {
             val key = Store.appKey(pkg)
             if (inFocus || Store.isActive(this, key)) {
+                if (hardNow) noteBlockedLaunch()
                 handleHit(null, key, pkg)
                 return
             }
