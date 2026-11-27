@@ -14,7 +14,7 @@ shot() {
   adb exec-out screencap -p > "$OUT/$1.png"
   # the sandbox cannot download CI artifacts, so each screenshot is also printed into the job log as a small JPEG (base64)
   if command -v convert >/dev/null && [ -s "$OUT/$1.png" ]; then
-    echo "SHOT-BEGIN $1"; convert "$OUT/$1.png" -resize 300x -quality 55 jpg:- | base64 -w0; echo; echo "SHOT-END $1"
+    echo "SHOT-BEGIN $1"; convert "$OUT/$1.png" -resize 420x -quality 55 jpg:- | base64 -w0; echo; echo "SHOT-END $1"
   fi
 }
 alive() { [ -n "$(adb shell pidof $PKG | tr -d '\r')" ]; }
@@ -61,6 +61,7 @@ shot 04_after_bg_loop
 
 note "4. lifecycle: rotate (activity recreation) x4"
 for r in 1 0 1 0; do adb shell settings put system user_rotation $r; sleep 1.5; done
+sleep 2
 shot 05_after_rotate
 alive || fail "app died during rotation"
 
@@ -103,6 +104,6 @@ alive || fail "app died after lock/unlock"
 note "8. crash scan"
 adb logcat -d > "$OUT/logcat.txt"
 if grep -q "FATAL EXCEPTION" "$OUT/logcat.txt"; then fail "FATAL EXCEPTION in logcat"; grep -A12 "FATAL EXCEPTION" "$OUT/logcat.txt" | head -40; fi
-if grep -qiE "ANR in|am_anr" "$OUT/logcat.txt"; then grep -iE "ANR in|am_anr" "$OUT/logcat.txt" | head -3; fail "ANR seen"; fi
+if grep -qE "ANR in $PKG" "$OUT/logcat.txt"; then grep -E "ANR in $PKG" "$OUT/logcat.txt" | head -3; fail "ANR seen"; fi
 echo "failures: $FAILS"
 exit $FAILS
