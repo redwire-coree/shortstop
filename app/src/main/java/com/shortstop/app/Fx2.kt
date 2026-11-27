@@ -678,12 +678,28 @@ class FuseButton(
             }
             MotionEvent.ACTION_UP -> {
                 animate().scaleX(1f).scaleY(1f).setDuration(160).start()
-                if (e.x in 0f..width.toFloat() && e.y in 0f..height.toFloat()) tap()
+                if (e.x in 0f..width.toFloat() && e.y in 0f..height.toFloat()) performClick()
             }
             MotionEvent.ACTION_CANCEL -> animate().scaleX(1f).scaleY(1f).setDuration(160).start()
         }
         return true
     }
+
+    // Screen readers (and UI tests) activate the button through performClick and read its current label.
+    override fun performClick(): Boolean {
+        super.performClick()
+        tap()
+        return true
+    }
+
+    override fun onInitializeAccessibilityNodeInfo(info: android.view.accessibility.AccessibilityNodeInfo) {
+        super.onInitializeAccessibilityNodeInfo(info)
+        info.className = "android.widget.Button"
+        info.text = shown()
+        info.isClickable = true
+    }
+
+    init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES }
 
     override fun onDetachedFromWindow() {
         burn?.cancel()
