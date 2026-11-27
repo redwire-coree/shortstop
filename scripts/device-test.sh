@@ -2,6 +2,8 @@
 # Runs on a CI emulator (see .github/workflows/device-test.yml). Zero app dependencies: only adb.
 # It installs the debug APK, seeds app state, drives lifecycle scenarios, takes screenshots and checks logcat for crashes.
 set -u
+# every adb call: no stdin (adb shell would swallow it) and a hard timeout, so one stuck call cannot hang the whole job
+adb() { timeout 60 /usr/bin/env adb "$@" < /dev/null; }
 PKG=com.shortstop.app
 OUT=${OUT:-shots}
 mkdir -p "$OUT"
