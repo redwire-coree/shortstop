@@ -82,6 +82,7 @@ X
   [ "$1" = true ] && echo "<long name=\"lock_until\" value=\"$END\" />"
   echo "${3:-}"
 }
+scrolldown() { adb shell input swipe $((W/2)) $((H*72/100)) $((W/2)) $((H*22/100)) 300; sleep 1; adb shell input swipe $((W/2)) $((H*72/100)) $((W/2)) $((H*22/100)) 300; sleep 1; }
 tab() { case $1 in 1) tapf 0.13 0.955;; 2) tapf 0.32 0.955;; 3) tapf 0.50 0.955;; 4) tapf 0.66 0.955;; 5) tapf 0.86 0.955;; esac; sleep 1.5; }
 
 adb logcat -c
@@ -132,12 +133,12 @@ sleep 3
 echo "== 4 normal focus"
 running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml
 F_END=$(pref f_end); F_START=$(pref f_start)
-start 3; shot 04_normal_running
+start 3; scrolldown; shot 04_normal_running
 has "End session"; check "normal focus: End session button detected" $?
 nonblank 04_normal_running; check "normal focus: not blank" $?
 sleep 20
 [ -n "$F_END" ] && [ "$(pref f_end)" = "$F_END" ] && [ "$(pref f_start)" = "$F_START" ]; check "timer state: start/end unchanged after 20 s (no reset or drift)" $?
-adb shell am force-stop $PKG; start 3; shot 04_normal_recovered
+adb shell am force-stop $PKG; start 3; scrolldown; shot 04_normal_recovered
 has "End session"; check "session recovery after process kill" $?
 [ -n "$F_END" ] && [ "$(pref f_end)" = "$F_END" ]; check "session recovery: end time preserved" $?
 
@@ -145,17 +146,17 @@ has "End session"; check "session recovery after process kill" $?
 echo "== 5 break"
 NOW=$(now_ms)
 { running_prefs false 25 | grep -v 'name="f_end"'; echo "<long name=\"f_end\" value=\"$((NOW+30*60000))\" /><long name=\"f_bu\" value=\"$((NOW+5*60000))\" /><long name=\"f_bs\" value=\"$NOW\" />"; } > /tmp/p.xml
-seed /tmp/p.xml; start 4; shot 05_break
+seed /tmp/p.xml; start 4; scrolldown; shot 05_break
 has "End break"; check "break: shows End break" $?
 has "Take a break"; [ $? -ne 0 ]; check "break: no Take a break while on break" $?
 for i in 1 2 3; do adb shell input keyevent KEYCODE_HOME; sleep 0.6; start 0.8; done
-shot 05_break_after_bg
+scrolldown; shot 05_break_after_bg
 has "End break"; check "break survives background/return" $?
 [ "$(pref g_lock)" = "true" ]; check "break: protection lock still held" $?
 
 # ---------------------------------------------------------------- 6. Ultra Focus running: End session attempt -> Rage
 echo "== 6 ultra focus running"
-running_prefs true 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 4; shot 06_ultra_running
+running_prefs true 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 4; scrolldown; shot 06_ultra_running
 has "Locked"; check "ultra running: End button shows Locked" $?
 nonblank 06_ultra_running; check "ultra running: not blank" $?
 taptext "Locked"; sleep 1.2; shot 06_ultra_end_tap
@@ -185,7 +186,7 @@ running_prefs true 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 6
 
 # ---------------------------------------------------------------- 8. Normal end flow: Begging, Undo, Dead
 echo "== 8 normal end session"
-running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 4
+running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 4; scrolldown
 taptext "End session"; sleep 1.5; shot 08_end_armed
 has "Undo"; check "normal end: Undo shown after End session" $?
 [ "$(count_move BEGGING)" -ge 1 ]; check "normal end: Begging plays while Undo is open" $? "diag: $(diag | tail -3)"
@@ -214,28 +215,41 @@ adb shell am force-stop $PKG; logclear; start 5
 [ "$(count_move VICTORY)" -eq 0 ]; check "completion: no Victory replay after reopening" $?
 has "Session complete"; [ $? -ne 0 ]; check "completion: summary not shown again after reopening" $?
 
-# ---------------------------------------------------------------- 10. Protection switch
+# ---------------------------------------------------------------- 10. Protection switch (Settings > Ultra Focus)
 echo "== 10 protection switch"
-base_prefs > /tmp/p.xml; echo '<boolean name="u_guard" value="false" />' >> /tmp/p.xml; seed /tmp/p.xml; start 3
-if taptext "Orange\. Tap to start" ; then
-  sleep 1.5; shot 10_start_sheet
-  if taptext "More options"; then
-    sleep 1.5; shot 10_ultra_sheet
-    if dump; python3 "$HERE/ui.py" find "$OUT/ui.xml" "Uninstall protection" > /tmp/xy; then
-      Y=$(cut -d' ' -f2 /tmp/xy)
-      adb shell input tap $((W*88/100)) $Y; sleep 1; shot 10_guard_on
-      [ "$(pref u_guard)" = "true" ]; check "protection: switching on is saved" $?
-      adb shell am force-stop $PKG; start 3
-      [ "$(pref u_guard)" = "true" ]; check "protection: stays on after restart" $?
-    else result BLOCKED "protection: toggle" "row 'Uninstall protection' not found in the sheet"; fi
-  else result BLOCKED "protection: toggle" "'More options' not found"; fi
-else result BLOCKED "protection: toggle" "start entry not found"; fi
-# lock while a session runs: try to switch off from Settings, if the control is reachable there
-running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml; start 3; tab 5; shot 10_settings_running
-if dump; python3 "$HERE/ui.py" find "$OUT/ui.xml" "Uninstall protection" > /tmp/xy 2>/dev/null; then
-  Y=$(cut -d' ' -f2 /tmp/xy); adb shell input tap $((W*88/100)) $Y; sleep 1; shot 10_guard_locked
-  [ "$(pref u_guard)" = "true" ]; check "protection: cannot be switched off during a running session" $?
-else result BLOCKED "protection: lock during session" "switch is not reachable on the Settings tab while a session runs (it lives in the start sheet)"; fi
+open_ultra_sheet() { start 3; tab 5; taptext "^Ultra Focus$" || return 1; sleep 1.5; return 0; }
+toggle_guard() { # taps the switch on the 'Uninstall protection' row; returns 1 when the row is not found
+  dump; python3 "$HERE/ui.py" find "$OUT/ui.xml" "Uninstall protection" > /tmp/xy || return 1
+  adb shell input tap $((W*88/100)) "$(cut -d' ' -f2 /tmp/xy)"; sleep 1; return 0
+}
+# a) no session: off -> on is saved and survives a restart
+{ base_prefs; echo '<boolean name="u_guard" value="false" />'; } > /tmp/p.xml; seed /tmp/p.xml
+if open_ultra_sheet; then
+  shot 10_ultra_sheet; echo "-- sheet texts:"; texts 30
+  if toggle_guard; then
+    shot 10_guard_on
+    [ "$(pref u_guard)" = "true" ]; check "protection: switching on is saved" $?
+    adb shell am force-stop $PKG; start 3
+    [ "$(pref u_guard)" = "true" ]; check "protection: stays on after restart" $?
+  else result BLOCKED "protection: switch on" "row 'Uninstall protection' not found in the Ultra Focus sheet"; fi
+else result BLOCKED "protection: switch on" "Ultra Focus link not found in Settings"; fi
+# b) session started with protection on: cannot be switched off
+running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml
+if open_ultra_sheet && toggle_guard; then
+  shot 10_guard_locked
+  [ "$(pref u_guard)" = "true" ]; check "protection: ON at session start cannot be switched off" $?
+  has "stays on"; check "protection: friendly explanation shown when blocked" $?
+else result BLOCKED "protection: lock at start" "could not reach the switch"; fi
+# c) switched on during a running session: locks immediately
+{ running_prefs false 25 | grep -v 'name="u_guard"\|name="g_lock"'; echo '<boolean name="u_guard" value="false" />'; } > /tmp/p.xml; seed /tmp/p.xml
+if open_ultra_sheet && toggle_guard; then
+  [ "$(pref u_guard)" = "true" ] && [ "$(pref g_lock)" = "true" ]; check "protection: switched on mid-session is locked at once" $?
+  toggle_guard; sleep 0.5
+  [ "$(pref u_guard)" = "true" ]; check "protection: then cannot be switched off during that session" $?
+else result BLOCKED "protection: lock mid-session" "could not reach the switch"; fi
+# d) protection OFF at session start stays off
+{ running_prefs false 25 | grep -v 'name="u_guard"\|name="g_lock"'; echo '<boolean name="u_guard" value="false" />'; } > /tmp/p.xml; seed /tmp/p.xml; start 5; sleep 5
+[ "$(pref u_guard)" = "false" ] && [ "$(pref g_lock)" != "true" ]; check "protection: OFF at start is never switched on automatically" $?
 
 # ---------------------------------------------------------------- 11. empty states and stats
 echo "== 11 empty states"
