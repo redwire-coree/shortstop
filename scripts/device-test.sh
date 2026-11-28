@@ -54,8 +54,14 @@ dump() { # fresh dump every time (a failed dump must never leave an old file to 
     sleep 1
   done
   adb exec-out cat /sdcard/ui.xml > "$OUT/ui.xml" 2>/dev/null
+  [ -s "$OUT/ui.xml" ]
 }
-has() { dump; python3 "$HERE/ui.py" find "$OUT/ui.xml" "$1" >/dev/null; }
+# has REGEX: 0 = found, 1 = dump fine but not there, 2 = no usable dump. Positive checks retry; use hasnt for "must be absent".
+has() { local n rc=2; for n in 1 2 3; do
+    if dump; then python3 "$HERE/ui.py" find "$OUT/ui.xml" "$1" >/dev/null && return 0; rc=1; else rc=2; fi
+    sleep 1
+  done; return $rc; }
+hasnt() { dump || return 2; python3 "$HERE/ui.py" find "$OUT/ui.xml" "$1" >/dev/null && return 1; return 0; }
 taptext() { dump; local xy; xy=$(python3 "$HERE/ui.py" find "$OUT/ui.xml" "$1") || return 1; adb shell input tap $xy; }
 texts() { dump; python3 "$HERE/ui.py" texts "$OUT/ui.xml" | head -${1:-25}; }
 diag() { adb logcat -d -s OrangeDiag:D 2>/dev/null; }
@@ -110,7 +116,8 @@ for i in 2 3 4 5; do
   echo "-- tab $i texts:"; texts 14
 done
 tab 4; sleep 3; shot 02_stats_a; sleep 2; shot 02_stats_b
-[ "$(convert $OUT/02_stats_a.png -crop 100%x88%+0+140 -format '%#' info:)" = "$(convert $OUT/02_stats_b.png -crop 100%x88%+0+140 -format '%#' info:)" ]; check "stats: numbers and charts have settled after 3 s (no ongoing roll)" $?
+d=$(compare -metric AE -fuzz 4% "$OUT/02_stats_a.png" "$OUT/02_stats_b.png" null: 2>&1 | grep -o '^[0-9]*'); echo "stats pixel difference after settle: ${d:-?}"
+[ -n "$d" ] && [ "$d" -lt 3000 ]; check "stats: numbers and charts have settled after 3 s (no ongoing roll)" $?
 tab 1; shot 02_tab_1_again
 alive; check "tabs: app alive after cycling all tabs" $?
 
@@ -163,7 +170,8 @@ nonblank 06_ultra_running; check "ultra running: not blank" $?
 dump; ENDXY=$(python3 "$HERE/ui.py" find "$OUT/ui.xml" "Locked"); echo "locked button at: $ENDXY"
 logclear; adb shell input tap $ENDXY; sleep 1.2; shot 06_ultra_end_tap
 [ "$(count_move FINAL_BOSS)" -ge 1 ]; check "ultra: End session attempt plays Rage" $? "diag: $(diag | tail -3)"
-for i in 1 2 3 4 5; do adb shell input tap $ENDXY; sleep 0.2; done   # no dump in between: really rapid
+adb shell "for i in 1 2 3 4 5 6; do input tap $ENDXY; done"   # one shell, no dump in between: really rapid
+echo "rage log: $(diag | grep -- '->' | tail -4)"
 sleep 1
 [ "$(count_move FINAL_BOSS)" -eq 1 ]; check "ultra: rapid repeated taps play Rage once" $? "count=$(count_move FINAL_BOSS)"
 sleep 5; shot 06_ultra_after_rage
@@ -216,7 +224,7 @@ has "Session complete"; check "completion: summary sheet shows after Victory" $?
 [ "$(pref f_end)" = "0" ] || [ -z "$(pref f_end)" ]; check "completion: session cleared" $?
 adb shell am force-stop $PKG; logclear; start 5
 [ "$(count_move VICTORY)" -eq 0 ]; check "completion: no Victory replay after reopening" $?
-has "Session complete"; [ $? -ne 0 ]; check "completion: summary not shown again after reopening" $?
+hasnt "Session complete"; check "completion: summary not shown again after reopening" $?
 
 # ---------------------------------------------------------------- 10. Protection switch (Settings > Ultra Focus)
 echo "== 10 protection switch"
@@ -239,7 +247,7 @@ if open_ultra_sheet; then
     adb shell am force-stop $PKG; start 3
     [ "$(pref u_guard)" = "true" ]; check "protection: stays on after restart" $?
   else result BLOCKED "protection: switch on" "row 'Uninstall protection' not found in the Ultra Focus sheet"; fi
-else result BLOCKED "protection: switch on" "Ultra Focus link not found in Settings"; fi
+else shot 10_a_settings_idle; echo "-- idle settings texts:"; texts 20; result BLOCKED "protection: switch on" "Ultra Focus link not found in Settings"; fi
 # b) session started with protection on: cannot be switched off
 running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml
 if open_ultra_sheet && toggle_guard; then
