@@ -1300,14 +1300,18 @@ class MainActivity : Activity() {
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         // Focus heading only: Bitsand, loaded from assets here and nowhere else (falls back to Inter Bold if missing)
         val bitsand = try { Typeface.createFromAsset(assets, "fonts/Bitsand-DEMO.ttf") } catch (e: Exception) { fonts.bold }
-        top.addView(display("Focus", 36f).apply {
+        val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        heading.addView(display("Focus", 36f).apply {
             setTextColor(FocusTheme.title(pal.dark))
             typeface = bitsand
             letterSpacing = 0f
-        }, lp(0, wrapC, 1f))
-        val chip = CallChip(this, pal, fonts)
-        statusChip = chip
-        top.addView(chip)
+        }, lp(wrapC, wrapC))
+        heading.addView(tv("Make this moment count.", 14f, fonts.medium, FocusTheme.muted(pal.dark)), lp(wrapC, wrapC).apply { topMargin = -dp(2) })
+        top.addView(heading, lp(0, wrapC, 1f))
+        // Guest placeholder: no sign-in, no account. A future avatar goes in through ProfileButton.setAvatar().
+        val profile = ProfileButton(this, pal.dark)
+        profile.setOnClickListener { toast("Guest", "Profiles are not available yet.") }
+        top.addView(profile, lp(dp(48), dp(48)))
         col.addView(top)
 
         // First-run setup: a stepper that watches the real state and moves on by itself
