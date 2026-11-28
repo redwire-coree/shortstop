@@ -17,15 +17,15 @@ import android.view.View
  * in or knows an account. When a real avatar exists, call [setAvatar] with a bitmap: it is centre-cropped into the same
  * circle, so the layout does not change.
  *
- * The view is 48 dp square (the touch target) and draws a 46 dp circle, with a clear border so it never melts into the
+ * The view is 48 dp square (the touch target) and draws a 44 dp circle, with a clear border so it never melts into the
  * cream background (light) or the dark brown (dark).
  */
 class ProfileButton(ctx: Context, private val dark: Boolean) : View(ctx) {
     private val d = ctx.resources.displayMetrics.density
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (dark) 0xFF4A2E1B.toInt() else 0xFFFFE6CB.toInt() }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (dark) 0xFF4A2E1B.toInt() else 0xFFFFEAD4.toInt() }
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeWidth = 1.5f * d
-        color = if (dark) 0xFFB8834F.toInt() else 0xFFE3A872.toInt()
+        color = if (dark) 0xFFB8834F.toInt() else 0xFFE8AE78.toInt()
     }
     private val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (dark) 0xFFF0CFAA.toInt() else 0xFFB5733A.toInt() }
     private val photo = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -36,6 +36,14 @@ class ProfileButton(ctx: Context, private val dark: Boolean) : View(ctx) {
 
     init {
         isClickable = true
+        // a soft lift instead of a drawn shadow: the system renders it, in both themes, without a software layer
+        elevation = 2f * d
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) {
+                val c = v.width / 2; val r = (22.5f * d).toInt()
+                o.setOval(c - r, c - r, c + r, c + r); o.alpha = if (dark) 0.5f else 0.35f
+            }
+        }
         contentDescription = "Profile, guest"
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
     }
@@ -54,7 +62,7 @@ class ProfileButton(ctx: Context, private val dark: Boolean) : View(ctx) {
 
     override fun onDraw(c: Canvas) {
         val cx = width / 2f; val cy = height / 2f
-        val r = 23f * d * (1f - 0.05f * pressedT)
+        val r = 22f * d * (1f - 0.05f * pressedT)
         c.drawCircle(cx, cy, r, fill)
         val a = avatar
         if (a != null) {

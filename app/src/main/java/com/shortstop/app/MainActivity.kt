@@ -1300,18 +1300,18 @@ class MainActivity : Activity() {
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         // Focus heading only: Bitsand, loaded from assets here and nowhere else (falls back to Inter Bold if missing)
         val bitsand = try { Typeface.createFromAsset(assets, "fonts/Bitsand-DEMO.ttf") } catch (e: Exception) { fonts.bold }
-        val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        heading.addView(display("Focus", 36f).apply {
+        // FOCUS on the left, nothing beneath it. includeFontPadding off so the glyphs, not the font's spare ascent, are
+        // centred against the profile button.
+        top.addView(display("Focus", 36f).apply {
             setTextColor(FocusTheme.title(pal.dark))
             typeface = bitsand
             letterSpacing = 0f
-        }, lp(wrapC, wrapC))
-        heading.addView(tv("Make this moment count.", 14f, fonts.medium, FocusTheme.muted(pal.dark)), lp(wrapC, wrapC).apply { topMargin = -dp(2) })
-        top.addView(heading, lp(0, wrapC, 1f))
-        // Guest placeholder: no sign-in, no account. A future avatar goes in through ProfileButton.setAvatar().
+            includeFontPadding = false
+        }, lp(0, wrapC, 1f))
+        // Guest placeholder: no sign-in, no account and no message. A future avatar goes in through ProfileButton.setAvatar(),
+        // and this is where profile functionality will attach (setOnClickListener).
         val profile = ProfileButton(this, pal.dark)
-        profile.setOnClickListener { toast("Guest", "Profiles are not available yet.") }
-        top.addView(profile, lp(dp(48), dp(48)))
+        top.addView(profile, lp(dp(48), dp(48)).apply { marginEnd = -dp(2) })
         col.addView(top)
 
         // First-run setup: a stepper that watches the real state and moves on by itself
