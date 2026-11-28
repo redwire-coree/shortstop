@@ -518,10 +518,64 @@ class FuseButton(
     var text: String = label
         set(v) {
             if (field != v) {
+                // A label that changes while idle (End session <-> Locked) cross-fades instead of snapping.
+                if (state == 0 && isAttachedToWindow && isLaidOut) {
+                    oldLabel = field
+                    swapAnim?.cancel()
+                    swap = 0f
+                    swapAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+                        duration = 240
+                        addUpdateListener { swap = it.animatedValue as Float; invalidate() }
+                        start()
+                    }
+                }
                 field = v
                 if (state == 0) { invalidate(); requestLayout() }
             }
         }
+    /** True while the real protection state keeps this button from ending the session: draws a padlock that closes/opens. */
+    var locked: Boolean = false
+        set(v) {
+            if (field == v) return
+            field = v
+            lockAnim?.cancel()
+            if (isAttachedToWindow && isLaidOut) {
+                lockAnim = ValueAnimator.ofFloat(lockT, if (v) 1f else 0f).apply {
+                    duration = 320
+                    interpolator = android.view.animation.DecelerateInterpolator(1.6f)
+                    addUpdateListener { lockT = it.animatedValue as Float; invalidate() }
+                    start()
+                }
+            } else { lockT = if (v) 1f else 0f }
+            invalidate()
+        }
+    private var lockT = 0f
+    private var lockAnim: ValueAnimator? = null
+    private var shakeAnim: ValueAnimator? = null
+
+    /** Feedback for a refused press while locked: a short damped shake and a firm haptic tick. The state does not change. */
+    fun refuse() {
+        performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS)
+        shakeAnim?.cancel()
+        val amp = context.dpf(5f)
+        shakeAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 380
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                translationX = (Math.sin(t * 3.0 * 2 * Math.PI) * (1f - t) * amp).toFloat()
+            }
+            onFinish { translationX = 0f }
+            start()
+        }
+        // the padlock bumps closed even if it was already drawn closed
+        lockAnim?.cancel()
+        lockAnim = ValueAnimator.ofFloat(0.55f, 1f).apply {
+            duration = 420
+            interpolator = android.view.animation.OvershootInterpolator(2.2f)
+            addUpdateListener { lockT = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
     /** Called the moment the fuse is lit (button pressed and allowed), and when the user takes it back with Undo. */
     var onArm: (() -> Unit)? = null
     var onUndo: (() -> Unit)? = null
@@ -581,8 +635,39 @@ class FuseButton(
         pm.setPath(outline, false)
     }
 
-    private fun drawLabel(c: Canvas, s: String, a: Float, cx: Float, cy: Float, check: Boolean) {
+    private val lockPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeWidth = ctx.dpf(1.8f) }
+    private val lockFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val lockRect = RectF()
+
+    private fun drawPadlock(c: Canvas, cx: Float, cy: Float, a: Float) {
+        val u = context.dpf(1f)
+        lockPaint.color = inkC; lockFill.color = inkC
+        lockPaint.alpha = (255 * a).toInt(); lockFill.alpha = (255 * a).toInt()
+        val bw = 11f * u; val bh = 8f * u
+        lockRect.set(cx - bw / 2, cy - bh / 2 + 2f * u, cx + bw / 2, cy + bh / 2 + 2f * u)
+        c.drawRoundRect(lockRect, 2f * u, 2f * u, lockFill)
+        // shackle: lifted and shifted aside when open (lockT = 0), seated when closed (lockT = 1)
+        val lift = (1f - lockT.coerceIn(0f, 1f)) * 3.5f * u
+        val r = bw * 0.27f
+        val top = lockRect.top - lift
+        val sh = Path().apply {
+            moveTo(cx - r, lockRect.top)
+            lineTo(cx - r, top - 1f * u)
+            arcTo(RectF(cx - r, top - r - 1f * u, cx + r, top + r - 1f * u), 180f, 180f)
+            lineTo(cx + r, if (lockT >= 0.99f) lockRect.top else top + 1f * u)
+        }
+        c.drawPath(sh, lockPaint)
+    }
+
+    private fun drawLabel(c: Canvas, s: String, a: Float, cx0: Float, cy: Float, check: Boolean) {
         if (a <= 0.01f) return
+        var cx = cx0
+        if (!check && locked && s == text && state == 0) {
+            val tw = txt.measureText(s)
+            val gap = context.dpf(18f)
+            drawPadlock(c, cx0 - tw / 2f - gap / 2f + context.dpf(2f), height / 2f, a)
+            cx = cx0 + gap / 2f
+        }
         txt.color = inkC
         txt.alpha = (255 * a).toInt()
         if (check) {
@@ -704,6 +789,9 @@ class FuseButton(
     override fun onDetachedFromWindow() {
         burn?.cancel()
         swapAnim?.cancel()
+        lockAnim?.cancel()
+        shakeAnim?.cancel()
+        translationX = 0f
         super.onDetachedFromWindow()
     }
 }

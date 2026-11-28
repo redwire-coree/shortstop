@@ -110,6 +110,7 @@ class MainActivity : Activity() {
     private var exMode: TextView? = null
     private var setupStepper: SetupStepper? = null
     private var runningCard: View? = null
+    private var focusScroll: ScrollView? = null
     private var runRing: TimerDial? = null
     private var runInfo: TextView? = null
     private var runBreakBtn: TextView? = null
@@ -720,7 +721,21 @@ class MainActivity : Activity() {
             txt.textSize = dp(11).toFloat()
             for (i in 0 until n) {
                 val left = i * (bw + gap)
-                val h = maxOf(dp(4).toFloat(), values[i].toFloat() / top * usable * grow)
+                if (values[i] <= 0) {
+                    // An empty day is a quiet round pip on the baseline, not a bar: no heavy black dash, even for today.
+                    val d = minOf(bw, dp(10).toFloat())
+                    val cx = left + bw / 2f
+                    bar.color = pal.track
+                    c.drawRoundRect(cx - d / 2f, baseY - d, cx + d / 2f, baseY, d / 2f, d / 2f, bar)
+                    if (i == highlight) {
+                        bar.color = pal.ink; bar.alpha = 110
+                        c.drawCircle(cx, baseY - d / 2f, dp(2).toFloat(), bar); bar.alpha = 255
+                    }
+                    txt.color = pal.muted
+                    c.drawText(labels[i], left + bw / 2f, height - dp(7).toFloat(), txt)
+                    continue
+                }
+                val h = maxOf(dp(6).toFloat(), values[i].toFloat() / top * usable * grow)
                 bar.color = if (i == highlight) pal.ink else pal.track
                 rect.set(left, baseY - h, left + bw, baseY)
                 c.drawRoundRect(rect, dp(6).toFloat(), dp(6).toFloat(), bar)
@@ -1066,7 +1081,7 @@ class MainActivity : Activity() {
         // blur what is behind the sheet (the real views, not the toast or sparkle layers), then dim it only gently
         clearBlurEffects()
         val blurTargets = (0 until rootFrame.childCount).map { rootFrame.getChildAt(it) }
-            .filter { v -> v.tag != "closing-sheet" && v.tag != "toast" }
+            .filter { v -> v.tag != "closing-sheet" && v.tag != "toast" && v.tag != "confetti" }
             .filter { v -> (v as Any) !== (toaster as Any?) && (v as Any) !== (spark as Any?) && (v as Any) !== (sheetLayer as Any?) }
         val scrim = SheetBackdrop(this, blurTargets, 0x59140A04, rootFrame).apply {
             setOnClickListener { closeSheet() }
@@ -1239,7 +1254,10 @@ class MainActivity : Activity() {
         setupStepper?.sync(booleanArrayOf(ack || on, on, batt))
         val sc = setupCard
         if (sc != null) {
-            if (on && batt) {
+            if (Store.focusRunning(this)) {
+                // While a session runs the timer owns the top of the page; incomplete setup waits until the session ends.
+                if (sc.visibility != View.GONE) sc.visibility = View.GONE
+            } else if (on && batt) {
                 // the stepper plays its "all set" moment and collapses the card itself
                 if (sc.visibility != View.VISIBLE || !sc.isLaidOut) sc.visibility = View.GONE
             } else if (sc.visibility != View.VISIBLE) {
@@ -1376,7 +1394,7 @@ class MainActivity : Activity() {
         val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val breakBtn = pill("Take a break", false) { onBreakClick() }
         val endBtn = FuseButton(this, pal, fonts, "End session", "Undo", "Ended", 4000L,
-            { if (Store.frozen(this)) { free(); onUltraEndAttempt(); false } else true }) {
+            { if (Store.frozen(this)) { free(); runEndBtn?.refuse(); onUltraEndAttempt(); false } else true }) {
             commitEndSession()
         }
         endBtn.onArm = { onEndArmed() }
@@ -1484,7 +1502,8 @@ class MainActivity : Activity() {
         statsWrap = wrap
         col.addView(wrap, lp(matchP, wrapC))
 
-        page.addView(scrollPage(col), lp(matchP, 0, 1f))
+        val focusSv = scrollPage(col); focusScroll = focusSv
+        page.addView(focusSv, lp(matchP, 0, 1f))
 
         // Start bar
         val bar = LinearLayout(this).apply {
@@ -1732,6 +1751,11 @@ class MainActivity : Activity() {
     private fun updateRunning() {
         Store.finalizeFocus(this)
         val running = Store.focusRunning(this)
+        if (running != (runningCard?.visibility == View.VISIBLE)) {
+            // The running card and the idle page swap places: start from the top so the timer (or, after a session, the
+            // companion and the completion) is on screen instead of wherever the page was scrolled to.
+            focusScroll?.post { focusScroll?.smoothScrollTo(0, 0) }
+        }
         runningCard?.visibility = if (running) View.VISIBLE else View.GONE
         statsWrap?.visibility = if (running) View.GONE else View.VISIBLE
         startBar?.visibility = if (running) View.GONE else View.VISIBLE
@@ -1772,8 +1796,10 @@ class MainActivity : Activity() {
                 b.text = if (onBreak) "End break" else "Take a break"
             }
             runEndBtn?.let { b ->
-                b.text = if (Store.frozen(this)) "Locked" else "End session"
-                b.alpha = if (Store.frozen(this)) 0.5f else 1f
+                val fz = Store.frozen(this)
+                b.text = if (fz) "Locked" else "End session"
+                b.locked = fz
+                b.alpha = if (fz) 0.78f else 1f
             }
             runLattice?.running = !onBreak
             calmOrange?.let { c ->
@@ -1893,7 +1919,19 @@ class MainActivity : Activity() {
         box.addView(btns, lp(matchP, wrapC))
         // Victory first, then the summary once the celebration has finished (full-size Orange 4.2 s, small one about 2.6 s).
         // A session that did not complete has no celebration, so its summary shows straight away.
-        val showSummary = Runnable { if (!isFinishing && !isDestroyed) showSheet("Session complete", box) }
+        val showSummary = Runnable {
+            if (isFinishing || isDestroyed) return@Runnable
+            showSheet("Session complete", box)
+            if (last.done) {
+                // The card settles in after the sheet, and a small confetti burst plays once above everything.
+                card.alpha = 0f; card.scaleX = 0.94f; card.scaleY = 0.94f; card.translationY = dp(14).toFloat()
+                card.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).setStartDelay(180).setDuration(560)
+                    .setInterpolator(SpringInterpolator(14f, 0.8f, 0.9f)).start()
+                val burst = ConfettiBurst(this)
+                rootFrame.addView(burst, FrameLayout.LayoutParams(matchP, matchP))
+                burst.post { burst.start() }
+            }
+        }
         if (last.done) ui.postDelayed(showSummary, if (fullSize) 4300L else 2600L) else showSummary.run()
     }
 
