@@ -61,6 +61,14 @@ has() { local n rc=2; for n in 1 2 3; do
     if dump; then python3 "$HERE/ui.py" find "$OUT/ui.xml" "$1" >/dev/null && return 0; rc=1; else rc=2; fi
     sleep 1
   done; return $rc; }
+# Reuses the last known End/Locked button position when a busy screen refuses to dump (the log says so).
+ENDXY_CACHE=""
+endxy() { # REGEX
+  dump; local xy; xy=$(python3 "$HERE/ui.py" find "$OUT/ui.xml" "$1" 2>/dev/null)
+  if [ -n "$xy" ]; then ENDXY_CACHE="$xy"; echo "$xy"; return 0; fi
+  if [ -n "$ENDXY_CACHE" ]; then echo "(dump unusable: cached button position)" >&2; echo "$ENDXY_CACHE"; return 0; fi
+  return 1
+}
 hasnt() { dump || return 2; python3 "$HERE/ui.py" find "$OUT/ui.xml" "$1" >/dev/null && return 1; return 0; }
 taptext() { dump; local xy; xy=$(python3 "$HERE/ui.py" find "$OUT/ui.xml" "$1") || return 1; adb shell input tap $xy; }
 texts() { dump; python3 "$HERE/ui.py" texts "$OUT/ui.xml" | head -${1:-25}; }
@@ -144,6 +152,7 @@ running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml
 F_END=$(pref f_end); F_START=$(pref f_start)
 start 3; scrolldown; shot 04_normal_running
 has "End session"; check "normal focus: End session button detected" $?
+endxy "End session" >/dev/null
 nonblank 04_normal_running; check "normal focus: not blank" $?
 sleep 20
 [ -n "$F_END" ] && [ "$(pref f_end)" = "$F_END" ] && [ "$(pref f_start)" = "$F_START" ]; check "timer state: start/end unchanged after 20 s (no reset or drift)" $?
@@ -167,7 +176,7 @@ echo "== 6 ultra focus running"
 running_prefs true 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 4; scrolldown; shot 06_ultra_running
 has "Locked"; check "ultra running: End button shows Locked" $?
 nonblank 06_ultra_running; check "ultra running: not blank" $?
-dump; ENDXY=$(python3 "$HERE/ui.py" find "$OUT/ui.xml" "Locked"); echo "locked button at: $ENDXY"
+ENDXY=$(endxy "Locked"); echo "locked button at: $ENDXY"
 logclear; adb shell input tap $ENDXY; sleep 1.2; shot 06_ultra_end_tap
 [ "$(count_move FINAL_BOSS)" -ge 1 ]; check "ultra: End session attempt plays Rage" $? "diag: $(diag | tail -3)"
 adb shell "for i in 1 2 3 4 5 6; do input tap $ENDXY; done"   # one shell, no dump in between: really rapid
@@ -197,7 +206,7 @@ running_prefs true 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 6
 # ---------------------------------------------------------------- 8. Normal end flow: Begging, Undo, Dead
 echo "== 8 normal end session"
 running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 4; scrolldown
-dump; ENDXY=$(python3 "$HERE/ui.py" find "$OUT/ui.xml" "End session"); echo "end button at: $ENDXY"
+ENDXY=$(endxy "End session"); echo "end button at: $ENDXY"
 adb shell input tap $ENDXY; sleep 1.2; shot 08_end_armed
 [ "$(count_move BEGGING)" -ge 1 ]; check "normal end: Begging plays while Undo is open" $? "diag: $(diag | tail -3)"
 adb shell input tap $ENDXY; sleep 1.5; shot 08_after_undo      # same spot: the button now reads Undo
@@ -231,6 +240,7 @@ echo "== 10 protection switch"
 open_ultra_sheet() { # Settings > Ultra Focus; the page animates in, so try a few times
   start 3; tab 5
   local n; for n in 1 2 3; do sleep 1; taptext "^Ultra Focus$" && { sleep 1.5; return 0; }; done
+  echo "(Settings dump unusable: retrying with a fresh start)"; start 3; tab 5; sleep 2; taptext "^Ultra Focus$" && { sleep 1.5; return 0; }
   return 1
 }
 toggle_guard() { # taps the switch on the 'Uninstall protection' row; returns 1 when the row is not found
