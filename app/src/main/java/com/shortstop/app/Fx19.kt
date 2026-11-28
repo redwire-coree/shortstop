@@ -595,7 +595,7 @@ class OrangeView(
                 val b = sin(t * 1.25f)
                 sy += 0.010f * b; sx -= 0.006f * b
                 rot = 0.3f * sin(t * 0.7f)
-                eyeOpenT = 0.97f; mouthMode = 1; lookYT = 0.12f
+                eyeOpenT = 1f; mouthMode = 1; lookYT = 0.12f
                 // Tiny asymmetric arm settling keeps the companion alive without distracting
                 // from the timer; wrists continue their own delayed micro-motion in the rig.
                 armL = 0.075f + 0.018f * sin(t * 1.05f)
@@ -1002,8 +1002,8 @@ class OrangeView(
                 b[RigCh.ARM_L_SH] = lL - 4f + 0.9f * br * m; b[RigCh.ARM_R_SH] = lR - 4f + 0.9f * br * m
                 // Peaceful concentration: a whisper of upper lid, a nearly level lid line (a steep one reads as angry),
                 // identical on both eyes, and a hint of a smile so the face is calm rather than stern.
-                b[RigCh.LID_L_COVER] = 0.07f; b[RigCh.LID_R_COVER] = 0.07f
-                b[RigCh.LID_L_TILT] = 0.04f; b[RigCh.LID_R_TILT] = 0.04f
+                b[RigCh.LID_L_COVER] = 0.045f; b[RigCh.LID_R_COVER] = 0.045f
+                b[RigCh.LID_L_TILT] = 0.03f; b[RigCh.LID_R_TILT] = 0.03f
                 b[RigCh.MOUTH_SMILE] = 0.18f
                 b[RigCh.FOOT_L_X] = -1f; b[RigCh.FOOT_R_X] = 1f
             }
@@ -1347,7 +1347,11 @@ class OrangeView(
                 // eye 0 is the left eye: its inner corner is on the right; eye 1 is mirrored
                 val yl = if (i == 0) yOut else yIn; val yr = if (i == 0) yIn else yOut
                 lidPath.reset()
-                lidPath.moveTo(wl - 6f, yl); lidPath.lineTo(wl + ww + 6f, yr)
+                // The upper lid is a soft arch (higher in the middle, lower at the corners), not a ruler-straight cut, so a
+                // lightly lowered lid still looks open and friendly. The arch fades out as the lid closes for a blink.
+                val arch = wh * 0.10f * (1f - cover).coerceIn(0f, 1f)
+                lidPath.moveTo(wl - 6f, yl)
+                lidPath.quadTo(wl + ww / 2f, (yl + yr) / 2f - 2f * arch, wl + ww + 6f, yr)
                 lidPath.lineTo(wl + ww + 6f, wt + wh + 6f); lidPath.lineTo(wl - 6f, wt + wh + 6f); lidPath.close()
                 c.clipPath(lidPath)
             }
