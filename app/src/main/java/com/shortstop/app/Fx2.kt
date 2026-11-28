@@ -943,12 +943,14 @@ class OdometerView(
     private var text = "0"
     private var t0 = 0L
     private var play = true
-    private val dur = 2400L
+    // A calm count-up: a short roll that settles without overshoot. The old 2.4 s, 40-digit spin with a rubber-band end
+    // left half-drawn digits on screen for over two seconds on every visit (a zero looked broken).
+    private val dur = 900L
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink; typeface = face; textAlign = Paint.Align.LEFT }
 
     fun setValue(v: Int, animate: Boolean = true) {
         text = v.toString()
-        play = animate
+        play = animate && v != 0   // nothing to count up to
         t0 = 0L
         requestLayout()
         invalidate()
@@ -972,7 +974,7 @@ class OdometerView(
         val lh = paint.descent() - paint.ascent()
         val by = -paint.ascent()
         val cw = paint.measureText("0")
-        val span = (dur - 90L * n).coerceAtLeast(600L)
+        val span = (dur - 60L * n).coerceAtLeast(450L)
         var x = 0f
         var live = false
         for (i in 0 until n) {
@@ -984,11 +986,11 @@ class OdometerView(
                 continue
             }
             val d = ch - '0'
-            val u = ((now - t0 - i * 90L).toFloat() / span).coerceIn(0f, 1f)
+            val u = ((now - t0 - i * 60L).toFloat() / span).coerceIn(0f, 1f)
             if (u < 1f) live = true
             val z = u - 1f
-            val e = 1f + 1.25f * z * z * z + 0.25f * z * z
-            val travel = (minOf(n - i, 4) * 10 + d).toFloat()
+            val e = 1f + z * z * z   // ease-out cubic, no overshoot
+            val travel = (minOf(n - i, 2) * 10 + d).toFloat()
             val p = travel * e
             val k = Math.floor(p.toDouble()).toInt()
             val frac = p - k

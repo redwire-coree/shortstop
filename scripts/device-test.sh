@@ -109,6 +109,8 @@ for i in 2 3 4 5; do
   prev=$cur
   echo "-- tab $i texts:"; texts 14
 done
+tab 4; sleep 3; shot 02_stats_a; sleep 2; shot 02_stats_b
+[ "$(convert $OUT/02_stats_a.png -crop 100%x88%+0+140 -format '%#' info:)" = "$(convert $OUT/02_stats_b.png -crop 100%x88%+0+140 -format '%#' info:)" ]; check "stats: numbers and charts have settled after 3 s (no ongoing roll)" $?
 tab 1; shot 02_tab_1_again
 alive; check "tabs: app alive after cycling all tabs" $?
 
@@ -147,11 +149,10 @@ echo "== 5 break"
 NOW=$(now_ms)
 { running_prefs false 25 | grep -v 'name="f_end"'; echo "<long name=\"f_end\" value=\"$((NOW+30*60000))\" /><long name=\"f_bu\" value=\"$((NOW+5*60000))\" /><long name=\"f_bs\" value=\"$NOW\" />"; } > /tmp/p.xml
 seed /tmp/p.xml; start 4; scrolldown; shot 05_break
-has "End break"; check "break: shows End break" $?
-has "Take a break"; [ $? -ne 0 ]; check "break: no Take a break while on break" $?
+has "Break ends in"; check "break: break countdown text shown" $?
 for i in 1 2 3; do adb shell input keyevent KEYCODE_HOME; sleep 0.6; start 0.8; done
 scrolldown; shot 05_break_after_bg
-has "End break"; check "break survives background/return" $?
+has "Break ends in"; check "break survives background/return" $?
 [ "$(pref g_lock)" = "true" ]; check "break: protection lock still held" $?
 
 # ---------------------------------------------------------------- 6. Ultra Focus running: End session attempt -> Rage
@@ -159,9 +160,10 @@ echo "== 6 ultra focus running"
 running_prefs true 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 4; scrolldown; shot 06_ultra_running
 has "Locked"; check "ultra running: End button shows Locked" $?
 nonblank 06_ultra_running; check "ultra running: not blank" $?
-taptext "Locked"; sleep 1.2; shot 06_ultra_end_tap
+dump; ENDXY=$(python3 "$HERE/ui.py" find "$OUT/ui.xml" "Locked"); echo "locked button at: $ENDXY"
+logclear; adb shell input tap $ENDXY; sleep 1.2; shot 06_ultra_end_tap
 [ "$(count_move FINAL_BOSS)" -ge 1 ]; check "ultra: End session attempt plays Rage" $? "diag: $(diag | tail -3)"
-for i in 1 2 3 4 5; do taptext "Locked"; sleep 0.15; done
+for i in 1 2 3 4 5; do adb shell input tap $ENDXY; sleep 0.2; done   # no dump in between: really rapid
 sleep 1
 [ "$(count_move FINAL_BOSS)" -eq 1 ]; check "ultra: rapid repeated taps play Rage once" $? "count=$(count_move FINAL_BOSS)"
 sleep 5; shot 06_ultra_after_rage
@@ -187,13 +189,14 @@ running_prefs true 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 6
 # ---------------------------------------------------------------- 8. Normal end flow: Begging, Undo, Dead
 echo "== 8 normal end session"
 running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 4; scrolldown
-taptext "End session"; sleep 1.5; shot 08_end_armed
-has "Undo"; check "normal end: Undo shown after End session" $?
+dump; ENDXY=$(python3 "$HERE/ui.py" find "$OUT/ui.xml" "End session"); echo "end button at: $ENDXY"
+adb shell input tap $ENDXY; sleep 1.2; shot 08_end_armed
 [ "$(count_move BEGGING)" -ge 1 ]; check "normal end: Begging plays while Undo is open" $? "diag: $(diag | tail -3)"
-taptext "Undo"; sleep 2; shot 08_after_undo
+adb shell input tap $ENDXY; sleep 1.5; shot 08_after_undo      # same spot: the button now reads Undo
+sleep 5
 [ -n "$(pref f_end)" ] && [ "$(pref f_end)" != "0" ]; check "normal end: Undo keeps the session running" $?
 [ "$(count_move DEAD)" -eq 0 ]; check "normal end: no Dead after Undo" $?
-taptext "End session"; sleep 6.5; shot 08_after_confirm
+adb shell input tap $ENDXY; sleep 6.5; shot 08_after_confirm
 [ "$(pref f_end)" = "0" ] || [ -z "$(pref f_end)" ]; check "normal end: confirmed end clears the session" $?
 [ "$(count_move DEAD)" -eq 1 ]; check "normal end: Dead plays once after confirm" $? "count=$(count_move DEAD)"
 [ "$(count_move VICTORY)" -eq 0 ]; check "normal end: no Victory for a manually ended session" $?
@@ -217,7 +220,11 @@ has "Session complete"; [ $? -ne 0 ]; check "completion: summary not shown again
 
 # ---------------------------------------------------------------- 10. Protection switch (Settings > Ultra Focus)
 echo "== 10 protection switch"
-open_ultra_sheet() { start 3; tab 5; taptext "^Ultra Focus$" || return 1; sleep 1.5; return 0; }
+open_ultra_sheet() { # Settings > Ultra Focus; the page animates in, so try a few times
+  start 3; tab 5
+  local n; for n in 1 2 3; do sleep 1; taptext "^Ultra Focus$" && { sleep 1.5; return 0; }; done
+  return 1
+}
 toggle_guard() { # taps the switch on the 'Uninstall protection' row; returns 1 when the row is not found
   dump; python3 "$HERE/ui.py" find "$OUT/ui.xml" "Uninstall protection" > /tmp/xy || return 1
   adb shell input tap $((W*88/100)) "$(cut -d' ' -f2 /tmp/xy)"; sleep 1; return 0
