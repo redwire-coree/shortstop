@@ -179,6 +179,7 @@ nonblank 06_ultra_running; check "ultra running: not blank" $?
 ENDXY=$(endxy "Locked"); echo "locked button at: $ENDXY"
 logclear; adb shell input tap $ENDXY; sleep 1.2; shot 06_ultra_end_tap
 [ "$(count_move FINAL_BOSS)" -ge 1 ]; check "ultra: End session attempt plays Rage" $? "diag: $(diag | tail -3)"
+sleep 5; logclear   # let the first Rage finish (screenshots are slow), then count only the burst
 adb shell "for i in 1 2 3 4 5 6; do input tap $ENDXY; done"   # one shell, no dump in between: really rapid
 echo "rage log: $(diag | grep -- '->' | tail -4)"
 sleep 1
@@ -207,13 +208,14 @@ running_prefs true 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 6
 echo "== 8 normal end session"
 running_prefs false 25 > /tmp/p.xml; seed /tmp/p.xml; logclear; start 4; scrolldown
 ENDXY=$(endxy "End session"); echo "end button at: $ENDXY"
-adb shell input tap $ENDXY; sleep 1.2; shot 08_end_armed
+adb shell input tap $ENDXY; sleep 1.2
 [ "$(count_move BEGGING)" -ge 1 ]; check "normal end: Begging plays while Undo is open" $? "diag: $(diag | tail -3)"
-adb shell input tap $ENDXY; sleep 1.5; shot 08_after_undo      # same spot: the button now reads Undo
+adb shell input tap $ENDXY; sleep 1.5; shot 08_after_undo      # same spot: the button now reads Undo; no screenshot before it, the undo window is only a few seconds
 sleep 5
 [ -n "$(pref f_end)" ] && [ "$(pref f_end)" != "0" ]; check "normal end: Undo keeps the session running" $?
 [ "$(count_move DEAD)" -eq 0 ]; check "normal end: no Dead after Undo" $?
-adb shell input tap $ENDXY; sleep 6.5; shot 08_after_confirm
+adb shell input tap $ENDXY; sleep 1.2; shot 08_end_armed2      # arm again, then let the undo window run out
+sleep 6; shot 08_after_confirm
 [ "$(pref f_end)" = "0" ] || [ -z "$(pref f_end)" ]; check "normal end: confirmed end clears the session" $?
 [ "$(count_move DEAD)" -eq 1 ]; check "normal end: Dead plays once after confirm" $? "count=$(count_move DEAD)"
 [ "$(count_move VICTORY)" -eq 0 ]; check "normal end: no Victory for a manually ended session" $?
@@ -241,7 +243,7 @@ open_ultra_sheet() { # Settings > Ultra Focus; the page animates in, so try a fe
   start 3; tab 5
   local n; for n in 1 2 3; do sleep 1; taptext "^Ultra Focus$" && { sleep 1.5; return 0; }; done
   echo "(Settings dump unusable: retrying with a fresh start)"; start 3; tab 5; sleep 2; taptext "^Ultra Focus$" && { sleep 1.5; return 0; }
-  return 1
+  echo "(Settings dump still unusable: tapping the Ultra Focus row by position, as seen in the screenshot)"; tapf 0.30 0.21; sleep 2; return 0
 }
 toggle_guard() { # taps the switch on the 'Uninstall protection' row; returns 1 when the row is not found
   dump; python3 "$HERE/ui.py" find "$OUT/ui.xml" "Uninstall protection" > /tmp/xy || return 1
